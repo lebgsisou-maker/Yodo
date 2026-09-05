@@ -1,0 +1,16 @@
+{
+  "name": "yodo-bot",
+  "version": "1.0.0",
+  "description": "Bot de protection CDE, Anti-Nuke et Anti-Raid intelligent",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+
