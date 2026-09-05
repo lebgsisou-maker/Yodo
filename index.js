@@ -34,7 +34,12 @@ client.once('ready', async () => {
         new SlashCommandBuilder()
             .setName('giveaway')
             .setDescription('Créer un giveaway sur le serveur')
-            .addStringArgs ? {} : new SlashCommandBuilder().setName('giveaway').setDescription('Créer un giveaway').addStringOption(o => o.setName('lot').setDescription('Ce à quoi on joue').setRequired(true)).toJSON()
+            .addStringOption(option => 
+                option.setName('lot')
+                    .setDescription('Ce à quoi on joue')
+                    .setRequired(true)
+            )
+            .toJSON()
     ];
 
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
@@ -48,7 +53,6 @@ client.once('ready', async () => {
 
 // 1. EVENT : Quand le bot rejoint un serveur (Message de bienvenue + Choix langue FR/EN)
 client.on('guildCreate', async (guild) => {
-    // Trouve le premier salon textuel disponible
     const channel = guild.systemChannel || guild.channels.cache.find(ch => ch.isTextBased() && ch.permissionsFor(guild.members.me).has('SendMessages'));
     if (!channel) return;
 
@@ -124,19 +128,23 @@ client.on('interactionCreate', async interaction => {
             serverSettings.set(interaction.guild.id, settings);
             return interaction.reply({ content: `🛡️ Niveau du système anti-raid mis à jour avec succès : **Niveau ${level}**.` });
         }
+
+        // Commande /giveaway
+        if (commandName === 'giveaway') {
+            const lot = interaction.options.getString('lot');
+            return interaction.reply({ content: `🎉 Giveaway lancé pour le lot : **${lot}** !` });
+        }
     }
 });
 
-// 3. IA & ANTI-NUKE INTÉGRÉ (Détection de bots malveillants, commandes bizarres ou !Nuke)
+// 3. IA & ANTI-NUKE INTÉGRÉ
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
     const content = message.content.trim();
 
-    // Détection d'une tentative de nuke (ex: commande !Nuke ou scripts suspects)
     if (content.toLowerCase().startsWith('!nuke') || content.toLowerCase().includes('mass ban') || content.toLowerCase().includes('webhook spam')) {
         try {
-            // L'IA/Le bot intercepte directement, ban l'auteur et supprime le message
             await message.delete();
             if (message.member && message.guild.members.me.permissions.has('BanMembers')) {
                 await message.guild.members.ban(message.author.id, { reason: 'Anti-Nuke AI: Tentative d\'attaque / Nuke détectée.' });
@@ -148,16 +156,4 @@ client.on('messageCreate', async message => {
     }
 });
 
-// 4. PROTECTION ANTI-RAID : Empêcher le passage de rôles non autorisé (Seul le propriétaire/admin principal peut enlever)
-client.on('guildMemberUpdate', (oldMember, newMember) => {
-    // Logique de verrouillage des rôles critique en cas de raid
-    const settings = serverSettings.get(newMember.guild.id);
-    if (settings && settings.antiRaidLevel >= 3) {
-        // Si le niveau est à 3 ou 4, on surveille les modifications de rôles sensibles
-        // Seul le propriétaire peut contourner si besoin
-    }
-});
-
-// Lancement du bot (Le token est récupéré depuis l'hébergeur Render via les variables d'environnement)
 client.login(process.env.TOKEN);
-          
