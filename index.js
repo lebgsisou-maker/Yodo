@@ -11,8 +11,56 @@ const client = new Client({
 });
 
 const serverSettings = new Map(); 
+const blacklist = new Map(); // Stocke les utilisateurs blacklistés par serveur
+const pendingCaptchas = new Map(); // Stocke les captchas en attente pour les nouveaux membres
 
-// Fonction pour convertir une durée (ex: "1d", "2h", "30m") en millisecondes
+// Textes traduits pour les 4 langues (FR, EN, ES, IT)
+const translations = {
+    fr: {
+        helpTitle: "📜 Centre d'Aide - Yodo Protect",
+        helpDesc: "Voici la liste officielle des commandes :",
+        configTitle: "⚙️ Panneau de Configuration",
+        antiraidTitle: "🚨 Centre de Sécurité & Verrouillage",
+        langSet: "✅ Langue configurée en **Français** !",
+        active: "🟢 Actif",
+        inactive: "🔴 Inactif"
+    },
+    en: {
+        helpTitle: "📜 Help Center - Yodo Protect",
+        helpDesc: "Here is the official command list:",
+        configTitle: "⚙️ Configuration Panel",
+        antiraidTitle: "🚨 Security & Lockdown Center",
+        langSet: "✅ Language successfully set to **English**!",
+        active: "🟢 Active",
+        inactive: "🔴 Inactive"
+    },
+    es: {
+        helpTitle: "📜 Centro de Ayuda - Yodo Protect",
+        helpDesc: "Aquí está la lista oficial de comandos:",
+        configTitle: "⚙️ Panel de Configuración",
+        antiraidTitle: "🚨 Centro de Seguridad y Bloqueo",
+        langSet: "✅ ¡Idioma configurado en **Español**!",
+        active: "🟢 Activo",
+        inactive: "🔴 Inactivo"
+    },
+    it: {
+        helpTitle: "📜 Centro Assistenza - Yodo Protect",
+        helpDesc: "Ecco l'elenco ufficiale dei comandi:",
+        configTitle: "⚙️ Pannello di Configurazione",
+        antiraidTitle: "🚨 Centro Sicurezza e Blocco",
+        langSet: "✅ Lingua impostata con successo in **Italiano**!",
+        active: "🟢 Attivo",
+        inactive: "🔴 Inattivo"
+    }
+};
+
+function getT(guildId, key) {
+    const settings = serverSettings.get(guildId) || { lang: 'fr' };
+    const lang = settings.lang || 'fr';
+    return translations[lang][key] || translations['fr'][key];
+}
+
+// Convertisseur de durée pour les giveaways (ex: 30m, 2h, 1d)
 function parseDuration(durationStr) {
     const match = durationStr.match(/^(\d+)([dhmsw])$/);
     if (!match) return null;
@@ -29,38 +77,69 @@ function parseDuration(durationStr) {
     }
 }
 
+// Générateur de code captcha aléatoire (4 caractères)
+function generateCaptchaCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 4; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+}
+
 client.once('ready', async () => {
     console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt.`);
 
     const commands = [
         new SlashCommandBuilder()
             .setName('config')
-            .setDescription('Ouvrir le panneau de configuration interactif (Admin)')
+            .setDescription('Ouvrir le panneau de configuration / Open config panel')
+            .setDescriptionLocalizations({ en: 'Open configuration panel', es: 'Abrir panel de configuración', it: 'Apri pannello di configurazione' })
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
             .setName('antiraid')
-            .setDescription('Activer ou désactiver le mode verrouillage Anti-Raid et Anti-Nuke (Admin)')
+            .setDescription('Activer ou désactiver l\'Anti-Raid et l\'Anti-Nuke')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
             .setName('giveaway')
-            .setDescription('Lancer un giveaway avec une durée personnalisée (ex: 1d, 2h, 30m)')
+            .setDescription('Lancer un giveaway (ex: 30m, 2h, 1d)')
+            .addStringOption(option => option.setName('lot').setDescription('Le lot à gagner').setRequired(true))
+            .addStringOption(option => option.setName('duree').setDescription('Durée (ex: 30m, 2h, 1d)').setRequired(true))
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+            .toJSON(),
+        new SlashCommandBuilder()
+            .setName('sanction')
+            .setDescription('Sanctionner un membre (mute, kick, ban)')
+            .addUserOption(option => option.setName('membre').setDescription('Membre à sanctionner').setRequired(true))
             .addStringOption(option => 
-                option.setName('lot')
-                    .setDescription('Le lot à gagner')
+                option.setName('type')
+                    .setDescription('Type de sanction')
                     .setRequired(true)
+                    .addChoices(
+                        { name: 'Mute (Exclusion temporaire)', value: 'mute' },
+                        { name: 'Kick (Expulsion)', value: 'kick' },
+                        { name: 'Ban (Bannissement)', value: 'ban' }
+                    )
             )
-            .addStringOption(option => 
-                option.setName('duree')
-                    .setDescription('Durée (ex: 30m, 2h, 1d, 1w)')
-                    .setRequired(true)
-            )
+            .addStringOption(option => option.setName('raison').setDescription('Raison de la sanction').setRequired(false))
+            .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+            .toJSON(),
+        new SlashCommandBuilder()
+            .setName('mp')
+            .setDescription('Envoyer un MP à un utilisateur (Réservé aux Fondateurs)')
+            .addUserOption(option => option.setName('utilisateur').setDescription('Utilisateur à contacter').setRequired(true))
+            .addStringOption(option => option.setName('message').setDescription('Message à envoyer').setRequired(true))
+            .toJSON(),
+        new SlashCommandBuilder()
+            .setName('captcha')
+            .setDescription('Activer ou désactiver le système de Captcha à l\'arrivée')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
             .setName('help')
-            .setDescription('Afficher la liste des commandes et l\'aide de Yodo Protect')
+            .setDescription('Afficher l\'aide de Yodo Protect')
             .toJSON()
     ];
 
@@ -73,78 +152,124 @@ client.once('ready', async () => {
     }
 });
 
-// 1. EVENT : Bienvenue sur un nouveau serveur
+// Événement : Nouveau serveur
 client.on('guildCreate', async (guild) => {
     const channel = guild.systemChannel || guild.channels.cache.find(ch => ch.isTextBased() && ch.permissionsFor(guild.members.me).has('SendMessages'));
     if (!channel) return;
 
-    serverSettings.set(guild.id, { lang: 'fr', antiRaidActive: false, antiNukeActive: true });
+    serverSettings.set(guild.id, { lang: 'fr', antiRaidActive: false, antiNukeActive: true, captchaActive: false });
 
     const welcomeEmbed = new EmbedBuilder()
         .setTitle('🛡️ Bienvenue avec Yodo Protect ! 🛡️')
-        .setDescription('Salut ! Je suis **Yodo**, votre bouclier de sécurité.\n\n' +
-                          '• **Anti-Nuke & Verrouillage Anti-Raid** renforcés.\n' +
-                          '• Tapez `/config` pour gérer les paramètres ou `/help` pour l\'aide.')
+        .setDescription('Salut ! Je suis **Yodo**, ton bouclier de sécurité.\n\n• Tape `/config` pour gérer les paramètres (Langue, Captcha, etc.).')
         .setColor('#5865F2')
         .setTimestamp();
 
     await channel.send({ embeds: [welcomeEmbed] });
 });
 
-// 2. GESTION DES INTERACTIONS
+// Gestion des interactions
 client.on('interactionCreate', async interaction => {
     let settings = serverSettings.get(interaction.guildId) || { 
         lang: 'fr', 
         antiRaidActive: false, 
-        antiNukeActive: true 
+        antiNukeActive: true, 
+        captchaActive: false 
     };
     serverSettings.set(interaction.guildId, settings);
-
-    const isFr = settings.lang === 'fr';
 
     if (interaction.isChatInputCommand()) {
         const { commandName } = interaction;
 
         if (commandName === 'help') {
             const embed = new EmbedBuilder()
-                .setTitle(isFr ? '📜 Centre d\'Aide - Yodo Protect' : '📜 Help Center - Yodo Protect')
-                .setDescription(isFr ? 'Voici la liste officielle des commandes :' : 'Here is the official command list:')
+                .setTitle(getT(interaction.guildId, 'helpTitle'))
+                .setDescription(getT(interaction.guildId, 'helpDesc'))
                 .addFields(
-                    { name: '/config', value: isFr ? 'Ouvre le panneau de configuration du bot.' : 'Opens bot configuration panel.' },
-                    { name: '/antiraid', value: isFr ? 'Verrouillage Anti-Raid strict & Anti-Nuke.' : 'Strict Anti-Raid lockdown & Anti-Nuke.' },
-                    { name: '/giveaway [lot] [duree]', value: isFr ? 'Lance un giveaway (ex: 30m, 2h, 1d).' : 'Starts a giveaway (ex: 30m, 2h, 1d).' },
-                    { name: '/help', value: isFr ? 'Affiche ce message d\'aide.' : 'Displays this help message.' }
+                    { name: '/config', value: 'Panneau de configuration / Configuration panel.' },
+                    { name: '/antiraid', value: 'Anti-Raid & Anti-Nuke.' },
+                    { name: '/giveaway [lot] [duree]', value: 'Lancer un giveaway avec minuteur.' },
+                    { name: '/sanction [membre] [type]', value: 'Sanctionner un membre.' },
+                    { name: '/mp [utilisateur] [message]', value: 'Envoyer un MP (Fondateur uniquement).' },
+                    { name: '/captcha', value: 'Activer/Désactiver le Captcha.' }
                 )
                 .setColor('#2b2d31');
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
 
-        // Sécurité des permissions
-        if (['config', 'antiraid', 'giveaway'].includes(commandName)) {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ 
-                    content: isFr ? '❌ Vous devez avoir la permission **Gérer le serveur**.' : '❌ You need the **Manage Server** permission.', 
-                    ephemeral: true 
-                });
+        // Commande /mp (Réservée strictement aux Fondateurs / Propriétaire du serveur)
+        if (commandName === 'mp') {
+            if (interaction.user.id !== interaction.guild.ownerId) {
+                return interaction.reply({ content: '❌ Cette commande est strictement réservée au **propriétaire (fondateur)** du serveur.', ephemeral: true });
+            }
+
+            const targetUser = interaction.options.getUser('utilisateur');
+            const msgContent = interaction.options.getString('message');
+
+            try {
+                await targetUser.send(`📬 **Message de la part de la direction de ${interaction.guild.name}** :\n\n${msgContent}`);
+                return interaction.reply({ content: `✅ Message privé envoyé avec succès à **${targetUser.tag}** !`, ephemeral: true });
+            } catch (e) {
+                return interaction.reply({ content: `❌ Impossible d'envoyer un message privé à cet utilisateur (ses MP sont sûrement fermés).`, ephemeral: true });
             }
         }
 
+        // Commande /sanction
+        if (commandName === 'sanction') {
+            const targetMember = interaction.options.getMember('membre');
+            const type = interaction.options.getString('type');
+            const reason = interaction.options.getString('raison') || 'Aucune raison spécifiée';
+
+            try {
+                if (type === 'mute') {
+                    await targetMember.timeout(15 * 60 * 1000, reason);
+                    return interaction.reply({ content: `✅ **${targetMember.user.tag}** a été mis en sourdine (mute) pendant 15 minutes. Raison : *${reason}*`, ephemeral: true });
+                } else if (type === 'kick') {
+                    await targetMember.kick(reason);
+                    return interaction.reply({ content: `✅ **${targetMember.user.tag}** a été expulsé (kick). Raison : *${reason}*`, ephemeral: true });
+                } else if (type === 'ban') {
+                    await targetMember.ban({ reason: reason });
+                    return interaction.reply({ content: `✅ **${targetMember.user.tag}** a été banni. Raison : *${reason}*`, ephemeral: true });
+                }
+            } catch (e) {
+                return interaction.reply({ content: `❌ Erreur lors de l'application de la sanction. Vérifie mes permissions.`, ephemeral: true });
+            }
+        }
+
+        // Commande /captcha (Activer / Désactiver)
+        if (commandName === 'captcha') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({ content: '❌ Permission requise : Gérer le serveur.', ephemeral: true });
+            }
+            settings.captchaActive = !settings.captchaActive;
+            return interaction.reply({ 
+                content: settings.captchaActive ? '🛡️ **Système de Captcha activé !** Les nouveaux arrivants devront résoudre un captcha en MP.' : '⚠️ **Système de Captcha désactivé.**', 
+                ephemeral: true 
+            });
+        }
+
         if (commandName === 'config') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
+            }
+
             const embed = new EmbedBuilder()
-                .setTitle(isFr ? '⚙️ Panneau de Configuration' : '⚙️ Configuration Panel')
-                .setDescription(isFr ? 'Gérez la langue et la sécurité du serveur.' : 'Manage server language and security.')
+                .setTitle(getT(interaction.guildId, 'configTitle'))
+                .setDescription('Gère la langue et les options du bot / Manage bot settings.')
                 .addFields(
-                    { name: isFr ? '🌐 Langue' : '🌐 Language', value: settings.lang.toUpperCase(), inline: true },
-                    { name: '🛡️ Anti-Raid', value: settings.antiRaidActive ? '🟢 Actif' : '🔴 Inactif', inline: true },
-                    { name: '🤖 Anti-Nuke (IA)', value: settings.antiNukeActive ? '🟢 Actif' : '🔴 Inactif', inline: true }
+                    { name: '🌐 Langue / Language', value: settings.lang.toUpperCase(), inline: true },
+                    { name: '🛡️ Captcha', value: settings.captchaActive ? '🟢 Actif' : '🔴 Inactif', inline: true }
                 )
                 .setColor('#5865F2');
 
             const selectMenu = new StringSelectMenuBuilder()
-                .setCustomId('config_menu')
-                .setPlaceholder(isFr ? 'Sélectionnez un paramètre à configurer...' : 'Select a setting to configure...')
+                .setCustomId('config_lang_menu')
+                .setPlaceholder('Choisir la langue / Select language...')
                 .addOptions([
-                    { label: isFr ? 'Changer la Langue (FR / EN)' : 'Change Language (FR / EN)', value: 'menu_lang', emoji: '🌐' }
+                    { label: 'Français 🇫🇷', value: 'lang_fr' },
+                    { label: 'English 🇬🇧', value: 'lang_en' },
+                    { label: 'Español 🇪🇸', value: 'lang_es' },
+                    { label: 'Italiano 🇮🇹', value: 'lang_it' }
                 ]);
 
             const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -152,206 +277,141 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (commandName === 'antiraid') {
-            const embed = new EmbedBuilder()
-                .setTitle(isFr ? '🚨 Centre de Sécurité & Verrouillage' : '🚨 Security & Lockdown Center')
-                .setDescription(isFr ? 
-                    `État actuel :\n\n- **Anti-Raid (Blocage total arrivées & rôles) :** ${settings.antiRaidActive ? '🟢 ACTIVÉ' : '🔴 DÉSACTIVÉ'}\n- **Anti-Nuke :** ${settings.antiNukeActive ? '🟢 ACTIVÉ' : '🔴 DÉSACTIVÉ'}` :
-                    `Current status:\n\n- **Anti-Raid (Total join & roles lock):** ${settings.antiRaidActive ? '🟢 ENABLED' : '🔴 DISABLED'}\n- **Anti-Nuke:** ${settings.antiNukeActive ? '🟢 ENABLED' : '🔴 DISABLED'}`)
-                .setColor(settings.antiRaidActive ? '#ed4245' : '#57f287');
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
+            }
 
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId(settings.antiRaidActive ? 'antiraid_off' : 'antiraid_on')
-                    .setLabel(settings.antiRaidActive ? (isFr ? 'Désactiver l\'Anti-Raid' : 'Disable Anti-Raid') : (isFr ? 'Activer l\'Anti-Raid (Lock)' : 'Enable Anti-Raid (Lock)'))
-                    .setStyle(settings.antiRaidActive ? ButtonStyle.Success : ButtonStyle.Danger),
-                new ButtonBuilder()
-                    .setCustomId(settings.antiNukeActive ? 'antinuke_off' : 'antinuke_on')
-                    .setLabel(settings.antiNukeActive ? (isFr ? 'Désactiver l\'Anti-Nuke' : 'Disable Anti-Nuke') : (isFr ? 'Activer l\'Anti-Nuke' : 'Enable Anti-Nuke'))
-                    .setStyle(ButtonStyle.Secondary)
-            );
-
-            return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+            settings.antiRaidActive = !settings.antiRaidActive;
+            return interaction.reply({ 
+                content: settings.antiRaidActive ? '🚨 **Anti-Raid ACTIVÉ !** Arrivées et rôles non autorisés bloqués (Sauf pour toi, le propriétaire).' : '✅ **Anti-Raid DÉSACTIVÉ.**', 
+                ephemeral: true 
+            });
         }
 
+        // Commande /giveaway avec Minuteur dynamique
         if (commandName === 'giveaway') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
+            }
+
             const lot = interaction.options.getString('lot');
             const dureeStr = interaction.options.getString('duree');
             const durationMs = parseDuration(dureeStr);
 
             if (!durationMs) {
-                return interaction.reply({ 
-                    content: isFr ? '❌ Format de durée invalide ! Utilise par exemple : `30m` (minutes), `2h` (heures), `1d` (jour), `1w` (semaine).' : '❌ Invalid duration format! Use e.g.: `30m`, `2h`, `1d`, `1w`.', 
-                    ephemeral: true 
-                });
+                return interaction.reply({ content: '❌ Format invalide ! Exemples : `30m`, `2h`, `1d`, `1w`.', ephemeral: true });
             }
 
             const participants = new Set();
+            const endTime = Date.now() + durationMs;
 
             const giveawayEmbed = new EmbedBuilder()
-                .setTitle(isFr ? '🎉 GIVEAWAY EN COURS ! 🎉' : '🎉 GIVEAWAY IN PROGRESS! 🎉')
-                .setDescription(isFr ? 
-                    `Lot à gagner : **${lot}**\n⏱️ Durée : **${dureeStr}**\n👥 Participants : **0**\n\nClique sur le bouton ci-dessous pour participer !` :
-                    `Prize: **${lot}**\n⏱️ Duration: **${dureeStr}**\n👥 Entrants: **0**\n\nClick the button below to enter!`)
+                .setTitle('🎉 GIVEAWAY EN COURS ! 🎉')
+                .setDescription(`Lot : **${lot}**\n⏱️ Fin dans : **${dureeStr}**\n👥 Participants : **0**\n\nClique sur le bouton ci-dessous pour participer !`)
                 .setColor('#fEE75C')
                 .setTimestamp();
 
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('participate_giveaway').setLabel(isFr ? 'Participer 🎉' : 'Enter 🎉').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('view_participants').setLabel(isFr ? 'Voir les participants 📋' : 'View entrants 📋').setStyle(ButtonStyle.Secondary)
+                new ButtonBuilder().setCustomId('participate_gw').setLabel('Participer 🎉').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId('view_gw').setLabel('Voir les participants 📋').setStyle(ButtonStyle.Secondary)
             );
 
             const message = await interaction.reply({ embeds: [giveawayEmbed], components: [row], fetchReply: true });
 
+            // Minuteur de mise à jour visuelle (toutes les 15 secondes)
+            const interval = setInterval(async () => {
+                const timeLeft = endTime - Date.now();
+                if (timeLeft <= 0) {
+                    clearInterval(interval);
+                    return;
+                }
+                const minutesLeft = Math.ceil(timeLeft / (60 * 1000));
+                let timeText = `${minutesLeft} minutes`;
+                if (minutesLeft >= 60) {
+                    const hoursLeft = (minutesLeft / 60).toFixed(1);
+                    timeText = `${hoursLeft} heures`;
+                }
+
+                giveawayEmbed.setDescription(`Lot : **${lot}**\n⏱️ Fin dans : **~${timeText}**\n👥 Participants : **${participants.size}**\n\nClique sur le bouton ci-dessous pour participer !`);
+                await message.edit({ embeds: [giveawayEmbed] }).catch(() => {});
+            }, 15000);
+
             const collector = message.createMessageComponentCollector({ time: durationMs });
 
             collector.on('collect', async i => {
-                if (i.customId === 'participate_giveaway') {
+                if (i.customId === 'participate_gw') {
                     if (participants.has(i.user.id)) {
-                        return i.reply({ content: isFr ? '❌ Tu participes déjà à ce giveaway !' : '❌ You are already entered!', ephemeral: true });
+                        return i.reply({ content: '❌ Tu participes déjà !', ephemeral: true });
                     }
                     participants.add(i.user.id);
-                    
-                    giveawayEmbed.setDescription(isFr ? 
-                        `Lot à gagner : **${lot}**\n⏱️ Durée : **${dureeStr}**\n👥 Participants : **${participants.size}**\n\nClique sur le bouton ci-dessous pour participer !` :
-                        `Prize: **${lot}**\n⏱️ Duration: **${dureeStr}**\n👥 Entrants: **${participants.size}**\n\nClick the button below to enter!`);
-                    await i.update({ embeds: [giveawayEmbed] });
-                    return i.followUp({ content: isFr ? '✅ Ta participation a bien été enregistrée !' : '✅ Your entry has been recorded!', ephemeral: true });
+                    return i.reply({ content: '✅ Ta participation est enregistrée !', ephemeral: true });
                 }
-
-                if (i.customId === 'view_participants') {
-                    if (participants.size === 0) {
-                        return i.reply({ content: isFr ? '📋 Aucun participant pour l\'instant.' : '📋 No entrants yet.', ephemeral: true });
-                    }
+                if (i.customId === 'view_gw') {
+                    if (participants.size === 0) return i.reply({ content: '📋 Aucun participant pour l\'instant.', ephemeral: true });
                     const list = Array.from(participants).map(id => `<@${id}>`).join(', ');
-                    return i.reply({ content: isFr ? `📋 **Participants (${participants.size}) :** ${list}` : `📋 **Entrants (${participants.size}):** ${list}`, ephemeral: true });
+                    return i.reply({ content: `📋 **Participants (${participants.size}) :** ${list}`, ephemeral: true });
                 }
             });
 
             collector.on('end', async () => {
+                clearInterval(interval);
                 const endedEmbed = new EmbedBuilder()
-                    .setTitle(isFr ? '🎉 GIVEAWAY TERMINÉ ! 🎉' : '🎉 GIVEAWAY ENDED! 🎉')
+                    .setTitle('🎉 GIVEAWAY TERMINÉ ! 🎉')
                     .setColor('#ed4245')
                     .setTimestamp();
 
                 if (participants.size === 0) {
-                    endedEmbed.setDescription(isFr ? `Lot : **${lot}**\n\n❌ Aucun participant, il n'y a pas de gagnant.` : `Prize: **${lot}**\n\n❌ No participants, no winner.`);
+                    endedEmbed.setDescription(`Lot : **${lot}**\n\n❌ Aucun participant, pas de gagnant.`);
                     const disabledRow = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('participate_giveaway').setLabel(isFr ? 'Terminé' : 'Ended').setStyle(ButtonStyle.Secondary).setDisabled(true)
+                        new ButtonBuilder().setCustomId('end').setLabel('Terminé').setStyle(ButtonStyle.Secondary).setDisabled(true)
                     );
                     return message.edit({ embeds: [endedEmbed], components: [disabledRow] }).catch(() => {});
                 }
 
-                const participantsArray = Array.from(participants);
-                const winnerId = participantsArray[Math.floor(Math.random() * participantsArray.length)];
+                const arr = Array.from(participants);
+                const winnerId = arr[Math.floor(Math.random() * arr.length)];
 
-                endedEmbed.setDescription(isFr ? 
-                    `Lot : **${lot}**\n\n🏆 **Gagnant tiré au sort :** <@${winnerId}> !\nFélicitations à lui ! 🎉` :
-                    `Prize: **${lot}**\n\n🏆 **Winner drawn:** <@${winnerId}>!\nCongratulations! 🎉`);
-
+                endedEmbed.setDescription(`Lot : **${lot}**\n\n🏆 **Gagnant :** <@${winnerId}> !\nFélicitations ! 🎉`);
                 const disabledRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('participate_giveaway').setLabel(isFr ? 'Terminé' : 'Ended').setStyle(ButtonStyle.Secondary).setDisabled(true)
+                    new ButtonBuilder().setCustomId('end').setLabel('Terminé').setStyle(ButtonStyle.Secondary).setDisabled(true)
                 );
 
                 await message.edit({ embeds: [endedEmbed], components: [disabledRow] }).catch(() => {});
-                message.channel.send(isFr ? `🎉 Félicitations à <@${winnerId}> qui remporte le lot : **${lot}** !` : `🎉 Congratulations to <@${winnerId}> for winning: **${lot}**!`);
+                message.channel.send(`🎉 Félicitations à <@${winnerId}> qui remporte le lot : **${lot}** !`);
             });
-
             return;
         }
     }
 
-    // Gestion du menu déroulant
-    if (interaction.isStringSelectMenu()) {
-        if (interaction.customId === 'config_menu') {
-            const choice = interaction.values[0];
-            if (choice === 'menu_lang') {
-                const langRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('set_lang_fr').setLabel('Français 🇫🇷').setStyle(ButtonStyle.Primary),
-                    new ButtonBuilder().setCustomId('set_lang_en').setLabel('English 🇬🇧').setStyle(ButtonStyle.Secondary)
-                );
-                return interaction.update({ content: isFr ? '🌐 Choisis la langue du bot :' : '🌐 Choose bot language:', components: [langRow], embeds: [] });
-            }
-        }
-    }
+    // Gestion du menu de langue
+    if (interaction.isStringSelectMenu() && interaction.customId === 'config_lang_menu') {
+        const choice = interaction.values[0];
+        if (choice === 'lang_fr') settings.lang = 'fr';
+        if (choice === 'lang_en') settings.lang = 'en';
+        if (choice === 'lang_es') settings.lang = 'es';
+        if (choice === 'lang_it') settings.lang = 'it';
 
-    // Gestion des boutons
-    if (interaction.isButton()) {
-        const id = interaction.customId;
-
-        if (id === 'set_lang_fr') {
-            settings.lang = 'fr';
-            return interaction.update({ content: '✅ Langue configurée en **Français** !', components: [] });
-        }
-        if (id === 'set_lang_en') {
-            settings.lang = 'en';
-            return interaction.update({ content: '✅ Language successfully set to **English**!', components: [] });
-        }
-        if (id === 'antiraid_on') {
-            settings.antiRaidActive = true;
-            return interaction.update({ content: isFr ? '🚨 **MODE ANTI-RAID ACTIVÉ !** Les arrivées suspectes et l\'ajout de rôles sont totalement bloqués.' : '🚨 **ANTI-RAID MODE ENABLED!** Suspicious joins and role assignments are fully locked.', components: [] });
-        }
-        if (id === 'antiraid_off') {
-            settings.antiRaidActive = false;
-            return interaction.update({ content: isFr ? '✅ **Mode Anti-Raid désactivé.**' : '✅ **Anti-Raid mode disabled.**', components: [] });
-        }
-        if (id === 'antinuke_on') {
-            settings.antinukeActive = true;
-            return interaction.update({ content: isFr ? '🛡️ **Anti-Nuke activé.**' : '🛡️ **Anti-Nuke enabled.**', components: [] });
-        }
-        if (id === 'antinuke_off') {
-            settings.antinukeActive = false;
-            return interaction.update({ content: isFr ? '⚠️ **Anti-Nuke désactivé.**' : '⚠️ **Anti-Nuke disabled.**', components: [] });
-        }
+        return interaction.update({ content: getT(interaction.guildId, 'langSet'), components: [], embeds: [] });
     }
 });
 
-// 3. PROTECTION ANTI-RAID RENFORCÉE (Bloque net les arrivées et supprime instantanément les attributions de rôles non autorisées)
+// Système de Captcha et Anti-Raid à l'arrivée
 client.on('guildMemberAdd', async member => {
-    const settings = serverSettings.get(member.guild.id);
-    if (settings && settings.antiRaidActive) {
+    const settings = serverSettings.get(member.guild.id) || { antiRaidActive: false, captchaActive: false };
+
+    // Anti-Raid actif
+    if (settings.antiRaidActive) {
         try {
-            await member.send("⚠️ Ce serveur est sous verrouillage Anti-Raid strict. Les adhésions sont suspendues.").catch(() => {});
-            await member.kick('Anti-Raid actif : Expulsion automatique du nouveau membre.');
-        } catch (e) {
-            console.error("Erreur anti-raid member add :", e);
-        }
+            await member.send("⚠️ Serveur en verrouillage Anti-Raid.").catch(() => {});
+            await member.kick('Anti-Raid actif.');
+        } catch (e) {}
+        return;
     }
-});
 
-client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    const settings = serverSettings.get(newMember.guild.id);
-    if (settings && settings.antiRaidActive) {
-        const addedRoles = newMember.roles.cache.filter(role => !oldMember.roles.cache.has(role.id));
-        if (addedRoles.size > 0 && newMember.id !== newMember.guild.ownerId) {
-            try {
-                await newMember.roles.remove(addedRoles);
-                console.log(`[ANTI-RAID] Rôle(s) bloqué(s) et retiré(s) de ${newMember.user.tag} pendant le verrouillage.`);
-            } catch (e) {
-                console.error("Erreur lors du retrait de rôle anti-raid :", e);
-            }
-        }
-    }
-});
+    // Captcha actif
+    if (settings.captchaActive) {
+        const captchaCode = generateCaptchaCode();
+        pendingCaptchas.set(member.id, captchaCode);
 
-// 4. BOUCLIER ANTI-NUKE RENFORCÉ (Sans anti-spam)
-client.on('messageCreate', async message => {
-    if (message.author.bot || !message.guild) return;
-
-    const settings = serverSettings.get(message.guild.id) || { antiNukeActive: true };
-    const content = message.content.trim().toLowerCase();
-
-    if (settings.antiNukeActive && (content.startsWith('!nuke') || content.includes('mass ban') || content.includes('webhook spam'))) {
         try {
-            await message.delete();
-            if (message.member && message.guild.members.me.permissions.has('BanMembers')) {
-                await message.guild.members.ban(message.author.id, { reason: 'Anti-Nuke IA : Attaque neutralisée.' });
-                message.channel.send(`🚨 **ALERTE ANTI-NUKER** : ${message.author.tag} a été banni pour tentative d'attaque.`);
-            }
-        } catch (e) {
-            console.error("Erreur anti-nuke :", e);
-        }
-    }
-});
-
-client.login(process.env.TOKEN);
-                            
+            await member.send(`🔒 **Vérification de sécurité (Captcha)**\nPour accéder au serveur **${member.g
