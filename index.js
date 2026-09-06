@@ -16,7 +16,7 @@ client.once('ready', async () => {
     console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt.`);
 
     const commands = [
-        new SlashCommandBuilder()
+        new SlashCommandBuilder.CommandBuilder || new SlashCommandBuilder()
             .setName('config')
             .setDescription('Ouvrir le panneau de configuration interactif (Admin)')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
@@ -39,6 +39,11 @@ client.once('ready', async () => {
                     .setDescription('Durée du giveaway en heures (ex: 24 pour 1 jour)')
                     .setRequired(true)
             )
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+            .toJSON(),
+        new SlashCommandBuilder()
+            .setName('reglement')
+            .setDescription('Envoyer le règlement officiel du serveur (Admin)')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
@@ -97,6 +102,7 @@ client.on('interactionCreate', async interaction => {
                     { name: '/config', value: isFr ? 'Ouvre le panneau de configuration & Anti-Spam.' : 'Opens configuration & Anti-Spam panel.' },
                     { name: '/antiraid', value: isFr ? 'Verrouillage Anti-Raid strict & Anti-Nuke.' : 'Strict Anti-Raid lockdown & Anti-Nuke.' },
                     { name: '/giveaway [lot] [duree]', value: isFr ? 'Lance un giveaway avec durée personnalisée (en heures).' : 'Starts a giveaway with custom duration (in hours).' },
+                    { name: '/reglement', value: isFr ? 'Affiche le règlement officiel du serveur.' : 'Displays the official server rules.' },
                     { name: '/help', value: isFr ? 'Affiche ce message d\'aide.' : 'Displays this help message.' }
                 )
                 .setColor('#2b2d31');
@@ -104,13 +110,32 @@ client.on('interactionCreate', async interaction => {
         }
 
         // Sécurité des permissions
-        if (['config', 'antiraid', 'giveaway'].includes(commandName)) {
+        if (['config', 'antiraid', 'giveaway', 'reglement'].includes(commandName)) {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 return interaction.reply({ 
                     content: isFr ? '❌ Vous devez avoir la permission **Gérer le serveur**.' : '❌ You need the **Manage Server** permission.', 
                     ephemeral: true 
                 });
             }
+        }
+
+        if (commandName === 'reglement') {
+            const rulesEmbed = new EmbedBuilder()
+                .setTitle('⚡ RÈGLEMENT OFFICIEL — YODO PROTECT (SUPPORT) ⚡')
+                .setDescription('Bienvenue sur le serveur officiel de support de **Yodo Protect**, ton bouclier de sécurité Discord ultime ! 🛡️ Pour garantir une communauté saine, un support fluide et une ambiance au top, merci de respecter scrupuleusement les règles ci-dessous.')
+                .addFields(
+                    { name: '🌐 ARTICLE 1 : RESPECT & COURTOISIE', value: '• **Le respect d\'autrui est obligatoire.** 🤝 Aucune insulte, moquerie, discrimination, harcèlement ou propos haineux ne sera toléré.\n• La bienveillance est de mise : restez patients et polis.' },
+                    { name: '💬 ARTICLE 2 : CANAUX & ORGANISATION', value: '• **Utilisez les bons salons !** Posez vos questions de support dans les salons dédiés (`#support`). 📌\n• **Pas de spam ni de flood.** 🛑 Les messages répétitifs et majuscules abusives sont interdits.\n• **La publicité est strictement interdite.** 🚫' },
+                    { name: '🛡️ ARTICLE 3 : SÉCURITÉ & EXPLOITATION', value: '• Toute tentative d\'exploiter des failles (*bugs*) sur le bot **Yodo Protect** entraînera un **bannissement définitif** du serveur. ⚠️' },
+                    { name: '🎁 ARTICLE 4 : GIVEAWAYS & ANIMATIONS', value: '• Participer aux giveaways dans la joie et la bonne humeur ! 🎉\n• Toute tentative de triche (multi-comptes) = disqualification.' },
+                    { name: '🚫 ARTICLE 5 : SANCTIONS', value: '1. ⚠️ Avertissement\n2. 🔇 Mute temporaire\n3. 🔨 Expulsion / Bannissement' }
+                )
+                .setColor('#5865F2')
+                .setFooter({ text: 'Yodo Protect • Merci de respecter le règlement !' })
+                .setTimestamp();
+
+            await interaction.channel.send({ embeds: [rulesEmbed] });
+            return interaction.reply({ content: '✅ Règlement publié avec succès !', ephemeral: true });
         }
 
         if (commandName === 'config') {
@@ -162,7 +187,7 @@ client.on('interactionCreate', async interaction => {
         if (commandName === 'giveaway') {
             const lot = interaction.options.getString('lot');
             const hours = interaction.options.getInteger('duree');
-            const durationMs = hours * 60 * 60 * 1000; // Conversion des heures en millisecondes
+            const durationMs = hours * 60 * 60 * 1000; 
             const participants = new Set();
 
             const giveawayEmbed = new EmbedBuilder()
@@ -180,7 +205,6 @@ client.on('interactionCreate', async interaction => {
 
             const message = await interaction.reply({ embeds: [giveawayEmbed], components: [row], fetchReply: true });
 
-            // Collecteur basé sur la durée choisie par l'admin
             const collector = message.createMessageComponentCollector({ time: durationMs });
 
             collector.on('collect', async i => {
@@ -239,7 +263,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // Gestion du menu déroulant de configuration
+    // Gestion du menu déroulant et des boutons...
     if (interaction.isStringSelectMenu()) {
         if (interaction.customId === 'config_menu') {
             const choice = interaction.values[0];
@@ -261,7 +285,6 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // Gestion des boutons
     if (interaction.isButton()) {
         const id = interaction.customId;
 
@@ -297,71 +320,5 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// 3. PROTECTION ANTI-RAID (Bloque les arrivées ET les modifications de rôles suspectes)
-client.on('guildMemberAdd', async member => {
-    const settings = serverSettings.get(member.guild.id);
-    if (settings && settings.antiRaidActive) {
-        try {
-            await member.send("⚠️ Ce serveur est sous protection Anti-Raid stricte. Les adhésions sont suspendues.");
-            await member.kick('Anti-Raid actif : Expulsion automatique du nouveau membre.');
-        } catch (e) {
-            console.error("Erreur anti-raid member add :", e);
-        }
-    }
-});
-
-client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    const settings = serverSettings.get(newMember.guild.id);
-    if (settings && settings.antiRaidActive) {
-        const addedRoles = newMember.roles.cache.filter(role => !oldMember.roles.cache.has(role.id));
-        if (addedRoles.size > 0 && newMember.id !== newMember.guild.ownerId) {
-            try {
-                await newMember.roles.remove(addedRoles);
-                console.log(`[ANTI-RAID] Rôle(s) bloqué(s) et retiré(s) de ${newMember.user.tag} pendant le verrouillage.`);
-            } catch (e) {
-                console.error("Erreur lors du retrait de rôle anti-raid :", e);
-            }
-        }
-    }
-});
-
-// 4. BOUCLIER ANTI-NUKE & ANTI-SPAM INTELLIGENT
-client.on('messageCreate', async message => {
-    if (message.author.bot || !message.guild) return;
-
-    const settings = serverSettings.get(message.guild.id) || { antiSpamLimit: 5, antiNukeActive: true };
-    const content = message.content.trim();
-
-    if (settings.antiNukeActive && (content.toLowerCase().startsWith('!nuke') || content.toLowerCase().includes('mass ban') || content.toLowerCase().includes('webhook spam'))) {
-        try {
-            await message.delete();
-            if (message.member && message.guild.members.me.permissions.has('BanMembers')) {
-                await message.guild.members.ban(message.author.id, { reason: 'Anti-Nuke IA : Attaque neutralisée.' });
-                message.channel.send(`🚨 **ALERTE ANTI-NUKER** : ${message.author.tag} a été banni pour tentative d'attaque.`);
-            }
-        } catch (e) {
-            console.error("Erreur anti-nuke :", e);
-        }
-        return;
-    }
-
-    const words = content.split(/\s+/);
-    if (words.length >= settings.antiSpamLimit) {
-        const counts = {};
-        for (let w of words) {
-            counts[w] = (counts[w] || 0) + 1;
-            if (counts[w] >= settings.antiSpamLimit) {
-                try {
-                    await message.delete();
-                    message.channel.send(`⚠️ ${message.author}, attention au spam ! Message supprimé.`);
-                } catch (e) {
-                    console.error("Erreur anti-spam :", e);
-                }
-                break;
-            }
-        }
-    }
-});
-
 client.login(process.env.TOKEN);
-                        
+                                                                                                                                             
