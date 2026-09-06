@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, StringSelectMenuBuilder, PermissionFlagsBits, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, StringSelectMenuBuilder, PermissionFlagsBits, REST, Routes, ChannelType, PermissionsBitField } = require('discord.js');
 
 const client = new Client({
     intents: [
@@ -11,31 +11,31 @@ const client = new Client({
 });
 
 const serverSettings = new Map(); 
-const pendingCaptchas = new Map();
 
+// Traductions pour le /help et les messages
 const translations = {
     fr: {
         helpTitle: "📜 Centre d'Aide - Yodo Protect",
         helpDesc: "Voici la liste officielle des commandes :",
-        configTitle: "⚙️ Panneau de Configuration",
+        configTitle: "⚙️ Panneau de Configuration Yodo",
         langSet: "✅ Langue configurée en **Français** !"
     },
     en: {
         helpTitle: "📜 Help Center - Yodo Protect",
         helpDesc: "Here is the official command list:",
-        configTitle: "⚙️ Configuration Panel",
+        configTitle: "⚙️ Yodo Configuration Panel",
         langSet: "✅ Language successfully set to **English**!"
     },
     es: {
         helpTitle: "📜 Centro de Ayuda - Yodo Protect",
         helpDesc: "Aquí está la lista oficial de comandos:",
-        configTitle: "⚙️ Panel de Configuración",
+        configTitle: "⚙️ Panel de Configuración Yodo",
         langSet: "✅ ¡Idioma configurado en **Español**!"
     },
     it: {
         helpTitle: "📜 Centro Assistenza - Yodo Protect",
         helpDesc: "Ecco l'elenco ufficiale dei comandi:",
-        configTitle: "⚙️ Pannello di Configurazione",
+        configTitle: "⚙️ Pannello di Configurazione Yodo",
         langSet: "✅ Lingua impostata con successo in **Italiano**!"
     }
 };
@@ -46,38 +46,18 @@ function getT(guildId, key) {
     return translations[lang][key] || translations['fr'][key];
 }
 
-function parseDuration(durationStr) {
-    const match = durationStr.match(/^(\d+)([dhmsw])$/);
-    if (!match) return null;
-    const value = parseInt(match[1]);
-    const unit = match[2];
-    
-    switch (unit) {
-        case 's': return value * 1000;
-        case 'm': return value * 60 * 1000;
-        case 'h': return value * 60 * 60 * 1000;
-        case 'd': return value * 24 * 60 * 60 * 1000;
-        case 'w': return value * 7 * 24 * 60 * 60 * 1000;
-        default: return null;
-    }
-}
-
-function generateCaptchaCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i = 0; i < 4; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return code;
-}
-
 client.once('ready', async () => {
     console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt.`);
 
     const commands = [
         new SlashCommandBuilder()
             .setName('config')
-            .setDescription('Ouvrir le panneau de configuration')
+            .setDescription('Ouvrir le panneau de configuration du bot')
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+            .toJSON(),
+        new SlashCommandBuilder()
+            .setName('ticketpanel')
+            .setDescription('Envoyer le panel de tickets dans le salon')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
@@ -116,11 +96,6 @@ client.once('ready', async () => {
             .addStringOption(option => option.setName('message').setDescription('Message').setRequired(true))
             .toJSON(),
         new SlashCommandBuilder()
-            .setName('captcha')
-            .setDescription('Activer ou désactiver le Captcha')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-            .toJSON(),
-        new SlashCommandBuilder()
             .setName('help')
             .setDescription('Afficher l\'aide')
             .toJSON()
@@ -139,11 +114,11 @@ client.on('guildCreate', async (guild) => {
     const channel = guild.systemChannel || guild.channels.cache.find(ch => ch.isTextBased() && ch.permissionsFor(guild.members.me).has('SendMessages'));
     if (!channel) return;
 
-    serverSettings.set(guild.id, { lang: 'fr', antiRaidActive: false, antiNukeActive: true, captchaActive: false });
+    serverSettings.set(guild.id, { lang: 'fr', antiRaidActive: false });
 
     const welcomeEmbed = new EmbedBuilder()
         .setTitle('🛡️ Bienvenue avec Yodo Protect ! 🛡️')
-        .setDescription('Salut ! Je suis **Yodo**, ton bouclier de sécurité.\n\n• Tape `/config` pour gérer les paramètres.')
+        .setDescription('Salut ! Je suis **Yodo**, ton assistant de sécurité.\n\n• Tape `/config` pour ouvrir le panneau de configuration !\n• Tape `/ticketpanel` pour envoyer le panneau de tickets.')
         .setColor('#5865F2')
         .setTimestamp();
 
@@ -151,12 +126,7 @@ client.on('guildCreate', async (guild) => {
 });
 
 client.on('interactionCreate', async interaction => {
-    let settings = serverSettings.get(interaction.guildId) || { 
-        lang: 'fr', 
-        antiRaidActive: false, 
-        antiNukeActive: true, 
-        captchaActive: false 
-    };
+    let settings = serverSettings.get(interaction.guildId) || { lang: 'fr', antiRaidActive: false };
     serverSettings.set(interaction.guildId, settings);
 
     if (interaction.isChatInputCommand()) {
@@ -167,15 +137,66 @@ client.on('interactionCreate', async interaction => {
                 .setTitle(getT(interaction.guildId, 'helpTitle'))
                 .setDescription(getT(interaction.guildId, 'helpDesc'))
                 .addFields(
-                    { name: '/config', value: 'Panneau de configuration' },
-                    { name: '/antiraid', value: 'Anti-Raid & Anti-Nuke' },
+                    { name: '/config', value: 'Panneau de configuration (Langue, Anti-Raid...)' },
+                    { name: '/ticketpanel', value: 'Envoyer le panel de tickets' },
+                    { name: '/antiraid', value: 'Activer/Désactiver l\'Anti-Raid' },
                     { name: '/giveaway', value: 'Lancer un giveaway' },
                     { name: '/sanction', value: 'Sanctionner un membre' },
-                    { name: '/mp', value: 'Envoyer un MP (Fondateur)' },
-                    { name: '/captcha', value: 'Activer/Désactiver le Captcha' }
+                    { name: '/mp', value: 'Envoyer un MP (Fondateur)' }
                 )
                 .setColor('#2b2d31');
             return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        // --- COMMANDE CONFIG STYLE DRABOT ---
+        if (commandName === 'config') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
+            }
+
+            const embed = new EmbedBuilder()
+                .setTitle(getT(interaction.guildId, 'configTitle'))
+                .setDescription('Gère les paramètres principaux de ton serveur directement via ce panneau.')
+                .addFields(
+                    { name: '🌐 Langue actuelle', value: settings.lang.toUpperCase(), inline: true },
+                    { name: '🛡️ Anti-Raid', value: settings.antiRaidActive ? '🟢 Activé' : '🔴 Désactivé', inline: true }
+                )
+                .setColor('#5865F2');
+
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId('config_lang_menu')
+                .setPlaceholder('🌐 Choisir la langue du bot...')
+                .addOptions([
+                    { label: 'Français 🇫🇷', value: 'lang_fr' },
+                    { label: 'English 🇬🇧', value: 'lang_en' },
+                    { label: 'Español 🇪🇸', value: 'lang_es' },
+                    { label: 'Italiano 🇮🇹', value: 'lang_it' }
+                ]);
+
+            const row = new ActionRowBuilder().addComponents(selectMenu);
+            return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+        }
+
+        if (commandName === 'ticketpanel') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
+            }
+
+            const embed = new EmbedBuilder()
+                .setTitle('🎫 Support & Tickets - Yodo Protect')
+                .setDescription('Besoin d\'aide, d\'un partenariat ou de signaler un bug ?\n\nClique sur le bouton correspondant ci-dessous pour ouvrir un salon de ticket privé avec le staff.')
+                .setColor('#5865F2')
+                .setFooter({ text: 'Système de tickets intelligent' });
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('ticket_staff').setLabel('Contacter le staff').setEmoji('🎫').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId('ticket_bug').setLabel('Bug / Technique').setEmoji('🐛').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId('ticket_collab').setLabel('Partenariat & Collab').setEmoji('🤝').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('ticket_question').setLabel('Question générale').setEmoji('❓').setStyle(ButtonStyle.Secondary)
+            );
+
+            await interaction.channel.send({ embeds: [embed], components: [row] });
+            return interaction.reply({ content: '✅ Le panel de tickets a été envoyé avec succès !', ephemeral: true });
         }
 
         if (commandName === 'mp') {
@@ -215,45 +236,6 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
-        if (commandName === 'captcha') {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
-            }
-            settings.captchaActive = !settings.captchaActive;
-            return interaction.reply({ 
-                content: settings.captchaActive ? '🛡️ **Captcha activé !**' : '⚠️ **Captcha désactivé.**', 
-                ephemeral: true 
-            });
-        }
-
-        if (commandName === 'config') {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
-            }
-
-            const embed = new EmbedBuilder()
-                .setTitle(getT(interaction.guildId, 'configTitle'))
-                .setDescription('Paramètres du bot')
-                .addFields(
-                    { name: '🌐 Langue', value: settings.lang.toUpperCase(), inline: true },
-                    { name: '🛡️ Captcha', value: settings.captchaActive ? '🟢 Actif' : '🔴 Inactif', inline: true }
-                )
-                .setColor('#5865F2');
-
-            const selectMenu = new StringSelectMenuBuilder()
-                .setCustomId('config_lang_menu')
-                .setPlaceholder('Choisir la langue...')
-                .addOptions([
-                    { label: 'Français 🇫🇷', value: 'lang_fr' },
-                    { label: 'English 🇬🇧', value: 'lang_en' },
-                    { label: 'Español 🇪🇸', value: 'lang_es' },
-                    { label: 'Italiano 🇮🇹', value: 'lang_it' }
-                ]);
-
-            const row = new ActionRowBuilder().addComponents(selectMenu);
-            return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
-        }
-
         if (commandName === 'antiraid') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
@@ -265,100 +247,9 @@ client.on('interactionCreate', async interaction => {
                 ephemeral: true 
             });
         }
-
-        if (commandName === 'giveaway') {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
-            }
-
-            const lot = interaction.options.getString('lot');
-            const dureeStr = interaction.options.getString('duree');
-            const durationMs = parseDuration(dureeStr);
-
-            if (!durationMs) {
-                return interaction.reply({ content: '❌ Format invalide ! Exemples : `30m`, `2h`, `1d`, `1w`.', ephemeral: true });
-            }
-
-            const participants = new Set();
-            const endTime = Date.now() + durationMs;
-
-            const giveawayEmbed = new EmbedBuilder()
-                .setTitle('🎉 GIVEAWAY EN COURS ! 🎉')
-                .setDescription(`Lot : **${lot}**\n⏱️ Fin dans : **${dureeStr}**\n👥 Participants : **0**\n\nClique pour participer !`)
-                .setColor('#fEE75C')
-                .setTimestamp();
-
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('participate_gw').setLabel('Participer 🎉').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('view_gw').setLabel('Participants 📋').setStyle(ButtonStyle.Secondary)
-            );
-
-            const message = await interaction.reply({ embeds: [giveawayEmbed], components: [row], fetchReply: true });
-
-            const interval = setInterval(async () => {
-                const timeLeft = endTime - Date.now();
-                if (timeLeft <= 0) {
-                    clearInterval(interval);
-                    return;
-                }
-                const minutesLeft = Math.ceil(timeLeft / (60 * 1000));
-                let timeText = `${minutesLeft} minutes`;
-                if (minutesLeft >= 60) {
-                    const hoursLeft = (minutesLeft / 60).toFixed(1);
-                    timeText = `${hoursLeft} heures`;
-                }
-
-                giveawayEmbed.setDescription(`Lot : **${lot}**\n⏱️ Fin dans : **~${timeText}**\n👥 Participants : **${participants.size}**\n\nClique pour participer !`);
-                await message.edit({ embeds: [giveawayEmbed] }).catch(() => {});
-            }, 15000);
-
-            const collector = message.createMessageComponentCollector({ time: durationMs });
-
-            collector.on('collect', async i => {
-                if (i.customId === 'participate_gw') {
-                    if (participants.has(i.user.id)) {
-                        return i.reply({ content: '❌ Tu participes déjà !', ephemeral: true });
-                    }
-                    participants.add(i.user.id);
-                    return i.reply({ content: '✅ Participation enregistrée !', ephemeral: true });
-                }
-                if (i.customId === 'view_gw') {
-                    if (participants.size === 0) return i.reply({ content: '📋 Aucun participant.', ephemeral: true });
-                    const list = Array.from(participants).map(id => `<@${id}>`).join(', ');
-                    return i.reply({ content: `📋 **Participants (${participants.size}) :** ${list}`, ephemeral: true });
-                }
-            });
-
-            collector.on('end', async () => {
-                clearInterval(interval);
-                const endedEmbed = new EmbedBuilder()
-                    .setTitle('🎉 GIVEAWAY TERMINÉ ! 🎉')
-                    .setColor('#ed4245')
-                    .setTimestamp();
-
-                if (participants.size === 0) {
-                    endedEmbed.setDescription(`Lot : **${lot}**\n\n❌ Aucun participant.`);
-                    const disabledRow = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('end').setLabel('Terminé').setStyle(ButtonStyle.Secondary).setDisabled(true)
-                    );
-                    return message.edit({ embeds: [endedEmbed], components: [disabledRow] }).catch(() => {});
-                }
-
-                const arr = Array.from(participants);
-                const winnerId = arr[Math.floor(Math.random() * arr.length)];
-
-                endedEmbed.setDescription(`Lot : **${lot}**\n\n🏆 **Gagnant :** <@${winnerId}> !\nFélicitations ! 🎉`);
-                const disabledRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('end').setLabel('Terminé').setStyle(ButtonStyle.Secondary).setDisabled(true)
-                );
-
-                await message.edit({ embeds: [endedEmbed], components: [disabledRow] }).catch(() => {});
-                message.channel.send(`🎉 Félicitations à <@${winnerId}> qui remporte le lot : **${lot}** !`);
-            });
-            return;
-        }
     }
 
+    // Gestion du choix de la langue dans le /config
     if (interaction.isStringSelectMenu() && interaction.customId === 'config_lang_menu') {
         const choice = interaction.values[0];
         if (choice === 'lang_fr') settings.lang = 'fr';
@@ -368,72 +259,89 @@ client.on('interactionCreate', async interaction => {
 
         return interaction.update({ content: getT(interaction.guildId, 'langSet'), components: [], embeds: [] });
     }
-});
 
-client.on('guildMemberAdd', async member => {
-    const settings = serverSettings.get(member.guild.id) || { antiRaidActive: false, captchaActive: false };
+    // --- GESTION DES TICKETS & RELANCE STYLE NEXORA ---
+    if (interaction.isButton() && interaction.customId.startsWith('ticket_')) {
+        let ticketType = 'ticket';
+        if (interaction.customId === 'ticket_staff') ticketType = 'staff';
+        if (interaction.customId === 'ticket_bug') ticketType = 'bug';
+        if (interaction.customId === 'ticket_collab') ticketType = 'collab';
+        if (interaction.customId === 'ticket_question') ticketType = 'question';
 
-    if (settings.antiRaidActive) {
-        try {
-            await member.send("⚠️ Serveur en verrouillage Anti-Raid.").catch(() => {});
-            await member.kick('Anti-Raid actif.');
-        } catch (e) {}
-        return;
-    }
-
-    if (settings.captchaActive) {
-        const captchaCode = generateCaptchaCode();
-        pendingCaptchas.set(member.id, { code: captchaCode, guildId: member.guild.id });
+        await interaction.deferReply({ ephemeral: true });
 
         try {
-            await member.send(`🔒 **Vérification de sécurité (Captcha)**\nPour accéder au serveur **${member.guild.name}**, écris ce code exact : **${captchaCode}**`);
-        } catch (e) {
-            console.error("Impossible d'envoyer le captcha en MP :", e);
-        }
-    }
-});
+            const channelName = `ticket-${ticketType}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
+            
+            const ticketChannel = await interaction.guild.channels.create({
+                name: channelName,
+                type: ChannelType.GuildText,
+                permissionOverwrites: [
+                    {
+                        id: interaction.guild.id,
+                        deny: [PermissionsBitField.Flags.ViewChannel],
+                    },
+                    {
+                        id: interaction.user.id,
+                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+                    },
+                    {
+                        id: client.user.id,
+                        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageChannels],
+                    }
+                ],
+            });
 
-client.on('messageCreate', async message => {
-    if (message.guild || message.author.bot) return;
+            const embed = new EmbedBuilder()
+                .setTitle(`🎫 Ticket : ${ticketType.toUpperCase()}`)
+                .setDescription(`Bonjour ${interaction.user},\nJe suis l'assistance **Yodo**. Merci d'avoir ouvert un ticket. Un membre du staff va te répondre très bientôt.\n\nPour fermer ce salon, clique sur le bouton ci-dessous.`)
+                .setColor('#5865F2');
 
-    for (const [userId, data] of pendingCaptchas.entries()) {
-        if (message.author.id === userId) {
-            if (message.content.trim().toUpperCase() === data.code) {
-                pendingCaptchas.delete(userId);
+            const closeRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger)
+            );
 
+            await ticketChannel.send({ content: `${interaction.user}`, embeds: [embed], components: [closeRow] });
+
+            // Système de relance automatique (style Nexora) : si personne ne répond au bout de 2 minutes
+            setTimeout(async () => {
                 try {
-                    const guild = await client.guilds.fetch(data.guildId);
-                    const member = await guild.members.fetch(userId);
-                    const roleMembre = guild.roles.cache.find(r => r.name.toLowerCase() === 'membre');
+                    // On récupère le salon pour vérifier s'il existe toujours et combien de messages ont été envoyés
+                    const fetchedChannel = await interaction.guild.channels.fetch(ticketChannel.id);
+                    if (!fetchedChannel) return;
 
-                    if (roleMembre) {
-                        await member.roles.add(roleMembre);
+                    const messages = await fetchedChannel.messages.fetch({ limit: 10 });
+                    // Si le staff a déjà répondu (messages postés par un autre utilisateur que le bot ou l'auteur du ticket), on ne relance pas
+                    const staffReplied = messages.some(m => m.author.id !== client.user.id && m.author.id !== interaction.user.id);
+
+                    if (!staffReplied) {
+                        // On cherche le rôle "Staff" ou "Modérateur" sur le serveur pour le pinguer
+                        const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === 'staff' || r.name.toLowerCase() === 'moderateur' || r.name.toLowerCase() === 'modérateur');
+                        const pingTarget = staffRole ? `<@&${staffRole.id}>` : '@here';
+
+                        await fetchedChannel.send(`⚠️ **Rappel d'assistance Yodo** : Ce ticket est toujours en attente d'une réponse de la part de l'équipe ! ${pingTarget}`);
                     }
                 } catch (err) {
-                    console.error("Erreur attribution rôle après captcha :", err);
+                    // Le salon a peut-être été supprimé entretemps, on ignore l'erreur
                 }
+            }, 2 * 60 * 1000); // 2 minutes (tu peux changer le temps ici si tu veux, ex: 5 * 60 * 1000 pour 5 minutes)
 
-                return message.reply('✅ **Merci !** Captcha validé avec succès. Tu as maintenant accès à tous les salons du serveur ! 🎉');
-            } else {
-                return message.reply('❌ Code incorrect, réessaie.');
-            }
+            return interaction.editReply({ content: `✅ Ton ticket a été créé avec succès : ${ticketChannel} !` });
+        } catch (e) {
+            console.error(e);
+            return interaction.editReply({ content: `❌ Une erreur est survenue lors de la création du salon de ticket.` });
         }
     }
-});
 
-client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    const settings = serverSettings.get(newMember.guild.id);
-    if (settings && settings.antiRaidActive) {
-        if (newMember.id === newMember.guild.ownerId) return;
-
-        const addedRoles = newMember.roles.cache.filter(role => !oldMember.roles.cache.has(role.id));
-        if (addedRoles.size > 0) {
+    if (interaction.isButton() && interaction.customId === 'close_ticket') {
+        await interaction.reply({ content: '🔒 Fermeture du ticket dans 3 secondes...', ephemeral: true });
+        setTimeout(async () => {
             try {
-                await newMember.roles.remove(addedRoles);
+                await interaction.channel.delete();
             } catch (e) {}
-        }
+        }, 3000);
     }
 });
 
 client.login(process.env.TOKEN);
-                             
+                
