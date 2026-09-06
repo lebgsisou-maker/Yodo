@@ -13,6 +13,7 @@ const client = new Client({
 const serverSettings = new Map(); 
 const pendingCaptchas = new Map();
 
+// Traductions complètes (incluant le /help pour chaque langue)
 const translations = {
     fr: {
         helpTitle: "📜 Centre d'Aide - Yodo Protect",
@@ -77,7 +78,7 @@ client.once('ready', async () => {
     const commands = [
         new SlashCommandBuilder()
             .setName('config')
-            .setDescription('Ouvrir le panneau de configuration / Open config panel')
+            .setDescription('Ouvrir le panneau de configuration')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
@@ -370,6 +371,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
+// Envoi du Captcha en MP à l'arrivée
 client.on('guildMemberAdd', async member => {
     const settings = serverSettings.get(member.guild.id) || { antiRaidActive: false, captchaActive: false };
 
@@ -383,7 +385,8 @@ client.on('guildMemberAdd', async member => {
 
     if (settings.captchaActive) {
         const captchaCode = generateCaptchaCode();
-        pendingCaptchas.set(member.id, captchaCode);
+        // On stocke l'ID du membre et son guildId pour savoir où le débloquer après
+        pendingCaptchas.set(member.id, { code: captchaCode, guildId: member.guild.id });
 
         try {
             await member.send(`🔒 **Vérification de sécurité (Captcha)**\nPour accéder au serveur **${member.guild.name}**, écris ce code exact : **${captchaCode}**`);
@@ -393,14 +396,29 @@ client.on('guildMemberAdd', async member => {
     }
 });
 
+// Validation du Captcha en MP et attribution du rôle pour voir les salons
 client.on('messageCreate', async message => {
     if (message.guild || message.author.bot) return;
 
-    for (const [userId, code] of pendingCaptchas.entries()) {
+    for (const [userId, data] of pendingCaptchas.entries()) {
         if (message.author.id === userId) {
-            if (message.content.trim().toUpperCase() === code) {
+            if (message.content.trim().toUpperCase() === data.code) {
                 pendingCaptchas.delete(userId);
-                return message.reply('✅ Captcha validé avec succès ! Accès autorisé.');
+
+                // On cherche le serveur et le membre pour lui donner le rôle "Membre"
+                try {
+                    const guild = await client.guilds.fetch(data.guildId);
+                    const member = await guild.members.fetch(userId);
+                    const roleMembre = guild.roles.cache.find(r => r.name.toLowerCase() === 'membre');
+
+                    if (roleMembre) {
+                        await member.roles.add(roleMembre);
+                    }
+                } catch (err) {
+                    console.error("Erreur lors de l'attribution du rôle après captcha :", err);
+                }
+
+                return message.reply('✅ **Merci !** Captcha validé avec succès. Tu as maintenant accès à tous les salons du serveur ! 🎉');
             } else {
                 return message.reply('❌ Code incorrect, réessaie.');
             }
@@ -422,5 +440,4 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
 });
 
-client.login(process.env.TOKEN);
-                        
+client.login(process.env.
