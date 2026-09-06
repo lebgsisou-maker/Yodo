@@ -13,7 +13,6 @@ const client = new Client({
 const serverSettings = new Map(); 
 const pendingCaptchas = new Map();
 
-// Traductions complètes (incluant le /help pour chaque langue)
 const translations = {
     fr: {
         helpTitle: "📜 Centre d'Aide - Yodo Protect",
@@ -371,7 +370,6 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Envoi du Captcha en MP à l'arrivée
 client.on('guildMemberAdd', async member => {
     const settings = serverSettings.get(member.guild.id) || { antiRaidActive: false, captchaActive: false };
 
@@ -385,7 +383,6 @@ client.on('guildMemberAdd', async member => {
 
     if (settings.captchaActive) {
         const captchaCode = generateCaptchaCode();
-        // On stocke l'ID du membre et son guildId pour savoir où le débloquer après
         pendingCaptchas.set(member.id, { code: captchaCode, guildId: member.guild.id });
 
         try {
@@ -396,7 +393,6 @@ client.on('guildMemberAdd', async member => {
     }
 });
 
-// Validation du Captcha en MP et attribution du rôle pour voir les salons
 client.on('messageCreate', async message => {
     if (message.guild || message.author.bot) return;
 
@@ -405,7 +401,6 @@ client.on('messageCreate', async message => {
             if (message.content.trim().toUpperCase() === data.code) {
                 pendingCaptchas.delete(userId);
 
-                // On cherche le serveur et le membre pour lui donner le rôle "Membre"
                 try {
                     const guild = await client.guilds.fetch(data.guildId);
                     const member = await guild.members.fetch(userId);
@@ -415,7 +410,7 @@ client.on('messageCreate', async message => {
                         await member.roles.add(roleMembre);
                     }
                 } catch (err) {
-                    console.error("Erreur lors de l'attribution du rôle après captcha :", err);
+                    console.error("Erreur attribution rôle après captcha :", err);
                 }
 
                 return message.reply('✅ **Merci !** Captcha validé avec succès. Tu as maintenant accès à tous les salons du serveur ! 🎉');
@@ -440,4 +435,5 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
 });
 
-client.login(process.env.
+client.login(process.env.TOKEN);
+                             
