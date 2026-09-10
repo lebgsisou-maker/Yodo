@@ -12,7 +12,6 @@ const client = new Client({
 
 const serverSettings = new Map(); 
 
-// Traductions multilingues complètes (Bot + Textes de règlement)
 const translations = {
     fr: {
         helpTitle: "📜 Centre d'Aide - Yodo Protect",
@@ -64,7 +63,7 @@ const translations = {
         sec1Text: "• Rispetta ogni membro, niente insulti o molestie.\n• Niente spam, pubblicità o link non autorizzati.\n• Qualsiasi violazione comporterà sanzioni (mute, kick o ban).",
         sec2: "🤝 2. Etica e Regole di Discord",
         sec2Text: "• Gentilezza e mutuo soccorso obbligatori nel server.\n• Rispetto dei Termini di Servizio (TOS) di Discord.\n• Le partnership vengono gestite tramite i canali dedicati o il supporto.",
-        footer: "Yodo Protect • Sistema di moderazione intelligente"
+        footer: "Yodo Protect • Sistema di moderazione inteligente"
     }
 };
 
@@ -78,36 +77,20 @@ client.once('ready', async () => {
     console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt.`);
 
     const commands = [
-        new SlashCommandBuilder()
-            .setName('config')
-            .setDescription('Ouvrir le panneau de configuration')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-            .toJSON(),
-        new SlashCommandBuilder()
-            .setName('ticketpanel')
-            .setDescription('Envoyer le panel de tickets')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-            .toJSON(),
+        new SlashCommandBuilder().setName('config').setDescription('Ouvrir le panneau de configuration').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON(),
+        new SlashCommandBuilder().setName('ticketpanel').setDescription('Envoyer le panel de tickets').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON(),
         new SlashCommandBuilder()
             .setName('reglement')
             .setDescription('Générer le règlement personnalisé du serveur')
-            .addStringOption(option => 
-                option.setName('theme')
-                    .setDescription('Le thème du serveur (ex: SCP Fondation, Gaming, Chill...)')
-                    .setRequired(true)
-            )
+            .addStringOption(option => option.setName('theme').setDescription('Le thème du serveur (ex: SCP Fondation, Gaming...)').setRequired(true))
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
-        new SlashCommandBuilder()
-            .setName('antiraid')
-            .setDescription('Activer ou désactiver l\'Anti-Raid')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-            .toJSON(),
+        new SlashCommandBuilder().setName('antiraid').setDescription('Activer ou désactiver l\'Anti-Raid').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON(),
         new SlashCommandBuilder()
             .setName('giveaway')
             .setDescription('Lancer un giveaway')
             .addStringOption(option => option.setName('lot').setDescription('Lot').setRequired(true))
-            .addStringOption(option => option.setName('duree').setDescription('Durée (ex: 30m, 2h)').setRequired(true))
+            .addStringOption(option => option.setName('duree').setDescription('Durée').setRequired(true))
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
@@ -126,10 +109,7 @@ client.once('ready', async () => {
             .addUserOption(option => option.setName('utilisateur').setDescription('Utilisateur').setRequired(true))
             .addStringOption(option => option.setName('message').setDescription('Message').setRequired(true))
             .toJSON(),
-        new SlashCommandBuilder()
-            .setName('help')
-            .setDescription('Afficher l\'aide')
-            .toJSON()
+        new SlashCommandBuilder().setName('help').setDescription('Afficher l\'aide').toJSON()
     ];
 
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
@@ -141,7 +121,6 @@ client.once('ready', async () => {
     }
 });
 
-// Quand le bot rejoint un serveur, il demande la langue par défaut
 client.on('guildCreate', async (guild) => {
     const channel = guild.systemChannel || guild.channels.cache.find(ch => ch.isTextBased() && ch.permissionsFor(guild.members.me).has('SendMessages'));
     if (!channel) return;
@@ -167,7 +146,6 @@ client.on('interactionCreate', async interaction => {
     let settings = serverSettings.get(interaction.guildId) || { lang: 'fr', antiRaidActive: false };
     serverSettings.set(interaction.guildId, settings);
 
-    // Gestion des boutons de choix de langue initiaux à l'arrivée du bot
     if (interaction.isButton() && interaction.customId.startsWith('setlang_')) {
         const langCode = interaction.customId.split('_')[1];
         settings.lang = langCode;
@@ -193,15 +171,12 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
 
-        // --- COMMANDE REGLEMENT AVEC BOUTON TRANSLATE ---
         if (commandName === 'reglement') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
             }
 
             const theme = interaction.options.getString('theme');
-            const lang = settings.lang || 'fr';
-
             const reglementEmbed = new EmbedBuilder()
                 .setTitle(`${getT(interaction.guildId, 'regTitle')} - ${interaction.guild.name}`)
                 .setDescription(`${getT(interaction.guildId, 'regDesc')} **${theme}** :\n`)
@@ -213,7 +188,6 @@ client.on('interactionCreate', async interaction => {
                 .setFooter({ text: getT(interaction.guildId, 'footer'), iconURL: client.user.displayAvatarURL() })
                 .setTimestamp();
 
-            // Boutons de traduction en bas du règlement
             const translateRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`tr_fr_${theme}`).setLabel('Français 🇫🇷').setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder().setCustomId(`tr_en_${theme}`).setLabel('English 🇬🇧').setStyle(ButtonStyle.Secondary),
@@ -311,13 +285,10 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // Traduction dynamique du message de règlement via les boutons du bas
     if (interaction.isButton() && interaction.customId.startsWith('tr_')) {
         const parts = interaction.customId.split('_');
-        const targetLang = parts[1]; // fr, en, es, it
-        const theme = parts.slice(2).join('_'); // Le thème du serveur
-
-        // Sauvegarde temporaire de la langue pour ce rendu
+        const targetLang = parts[1];
+        const theme = parts.slice(2).join('_');
         const t = translations[targetLang] || translations['fr'];
 
         const translatedEmbed = new EmbedBuilder()
@@ -362,4 +333,19 @@ client.on('interactionCreate', async interaction => {
                     { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
                     { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] },
                     { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageChannels] }
-         
+                ],
+            });
+
+            const embed = new EmbedBuilder()
+                .setTitle(`🎫 Ticket : ${ticketType.toUpperCase()}`)
+                .setDescription(`Bonjour ${interaction.user},\nJe suis l'assistance **Yodo**. Un membre du staff va te répondre très bientôt.`)
+                .setColor('#5865F2');
+
+            const closeRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer').setEmoji('🔒').setStyle(ButtonStyle.Danger)
+            );
+
+            await ticketChannel.send({ content: `${interaction.user}`, embeds: [embed], components: [closeRow] });
+            return interaction.editReply({ content: `✅ Ton ticket a été créé : ${ticketChannel} !` });
+        } catch (e) {
+            return interaction.editReply({ content: `❌ Erreur lors
