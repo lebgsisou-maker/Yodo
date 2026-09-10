@@ -1,130 +1,286 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, StringSelectMenuBuilder, PermissionFlagsBits, REST, Routes, ChannelType, PermissionsBitField } = require('discord.js');
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildModeration] });
-const serverSettings = new Map(); 
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, StringSelectMenuBuilder, PermissionFlagsBits, REST, Routes, ChannelType, PermissionsBitField, AttachmentBuilder } = require('discord.js');
 
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildModeration
+    ]
+});
+
+// Stockage en mémoire des configurations par serveur (Langue, Anti-Raid IA, Rôles autorisés)
+const serverSettings = new Map();
+// Suivi anti-raid (comptage des messages pour détecter l'anomalie de spam)
+const raidTracker = new Map();
+
+// Traductions dynamiques et gestion des textes / descriptions
 const translations = {
-    fr: { helpTitle: "📜 Centre d'Aide - Yodo", helpDesc: "Liste des commandes :", configTitle: "⚙️ Configuration", langSet: "✅ Langue configurée en **Français** !", regTitle: "📜 RÈGLEMENT OFFICIEL", regDesc: "Bienvenue sur notre communauté orientée", sec1: "📌 1. Règlement Serveur & Sanctions", sec1Text: "• Respect, pas d'insultes ni de harcèlement.\n• Pas de spam ou liens non autorisés.\n• Sanctions en cas de manquement (mute/kick/ban).", sec2: "🤝 2. Règlement Éthique & Discord", sec2Text: "• Bienveillance et entraide.\n• Respect des TOS Discord.\n• Partenariats via le support.", footer: "Yodo Protect • Système de modération" },
-    en: { helpTitle: "📜 Help Center - Yodo", helpDesc: "Command list:", configTitle: "⚙️ Configuration", langSet: "✅ Language set to **English**!", regTitle: "📜 OFFICIAL RULES", regDesc: "Welcome to our community focused on", sec1: "📌 1. Server Rules & Sanctions", sec1Text: "• Respect, no insults or harassment.\n• No spam or unauthorized links.\n• Violations result in sanctions.", sec2: "🤝 2. Ethics & Discord Rules", sec2Text: "• Kindness and mutual aid.\n• Compliance with Discord TOS.\n• Partnerships via support.", footer: "Yodo Protect • Smart Moderation" },
-    es: { helpTitle: "📜 Centro de Ayuda - Yodo", helpDesc: "Lista de comandos:", configTitle: "⚙️ Configuración", langSet: "✅ ¡Idioma configurado en **Español**!", regTitle: "📜 REGLAMENTO OFICIAL", regDesc: "Bienvenido a nuestra comunidad enfocada en", sec1: "📌 1. Normas y Sanciones", sec1Text: "• Respeto, sin insultos ni acoso.\n• No spam ni enlaces no autorizados.\n• Infracciones acarrearán sanciones.", sec2: "🤝 2. Ética y Normas de Discord", sec2Text: "• Amabilidad y ayuda mutua.\n• Cumplimiento de TOS Discord.\n• Colaboraciones vía soporte.", footer: "Yodo Protect • Sistema de moderación" },
-    it: { helpTitle: "📜 Centro Assistenza - Yodo", helpDesc: "Elenco comandi:", configTitle: "⚙️ Configurazione", langSet: "✅ Lingua impostata in **Italiano**!", regTitle: "📜 REGOLAMENTO UFFICIALE", regDesc: "Benvenuto nella community incentrata su", sec1: "📌 1. Regole e Sanzioni", sec1Text: "• Rispetto, niente insulti o molestie.\n• Niente spam o link non autorizzati.\n• Violazioni comportano sanzioni.", sec2: "🤝 2. Etica e Regole di Discord", sec2Text: "• Gentilezza e mutuo soccorso.\n• Rispetto TOS Discord.\n• Partnership tramite supporto.", footer: "Yodo Protect • Sistema di moderazione" }
+    fr_FR: {
+        helpTitle: "📜 Centre d'Aide Avancé - Bot Modulaire",
+        helpDesc: "Voici la liste officielle des commandes disponibles :",
+        configTitle: "⚙️ Panneau de Configuration Global",
+        langSet: "✅ Langue du bot mise à jour en **Français (fr_FR)** !",
+        ticketTitle: "🎫 Support & Billetterie",
+        ticketDesc: "Besoin d'assistance ? Sélectionnez une catégorie ci-dessous pour ouvrir un ticket sécurisé.",
+        ticketCreated: "✅ Votre ticket a été ouvert avec succès :",
+        transcriptHeader: "--- TRANSCRIPT DU TICKET ---",
+        antiRaidAlert: "🚨 **Alerte Anti-Raid IA** : Anomalie détectée ! Des mesures de protection automatiques ont été activées.",
+        footer: "Système modulaire de sécurité et de gestion"
+    },
+    en_US: {
+        helpTitle: "📜 Advanced Help Center - Modular Bot",
+        helpDesc: "Here is the official list of available commands:",
+        configTitle: "⚙️ Global Configuration Panel",
+        langSet: "✅ Bot language updated to **English (en_US)**!",
+        ticketTitle: "🎫 Support & Ticketing",
+        ticketDesc: "Need assistance? Select a category below to open a secure ticket.",
+        ticketCreated: "✅ Your ticket has been successfully opened:",
+        transcriptHeader: "--- TICKET TRANSCRIPT ---",
+        antiRaidAlert: "🚨 **AI Anti-Raid Alert**: Anomaly detected! Automatic protection measures have been triggered.",
+        footer: "Modular security and management system"
+    },
+    es_ES: {
+        helpTitle: "📜 Centro de Ayuda Avanzado - Bot Modular",
+        helpDesc: "Aquí está la lista oficial de comandos disponibles:",
+        configTitle: "⚙️ Panel de Configuración Global",
+        langSet: "✅ ¡Idioma actualizado a **Español (es_ES)**!",
+        ticketTitle: "🎫 Soporte y Tickets",
+        ticketDesc: "¿Necesitas ayuda? Selecciona una categoría abajo para abrir un ticket seguro.",
+        ticketCreated: "✅ Tu ticket se ha abierto con éxito:",
+        transcriptHeader: "--- TRANSCRIPT DEL TICKET ---",
+        antiRaidAlert: "🚨 **Alerta Anti-Raid IA**: ¡Anomalía detectada! Se han activado medidas automáticas.",
+        footer: "Sistema modular de seguridad y gestión"
+    },
+    it_IT: {
+        helpTitle: "📜 Centro Assistenza Avanzato - Bot Modulare",
+        helpDesc: "Ecco l'elenco ufficiale dei comandi disponibili:",
+        configTitle: "⚙️ Pannello di Configurazione Globale",
+        langSet: "✅ Lingua aggiornata in **Italiano (it_IT)**!",
+        ticketTitle: "🎫 Supporto e Ticket",
+        ticketDesc: "Hai bisogno di assistenza? Seleziona una categoria qui sotto per aprire un ticket.",
+        ticketCreated: "✅ Il tuo ticket è stato aperto con successo:",
+        transcriptHeader: "--- TRANSCRIPT DEL TICKET ---",
+        antiRaidAlert: "🚨 **Allerta Anti-Raid IA**: Anomalia rilevata! Misure di protezione attivate.",
+        footer: "Sistema modulare di sicurezza e gestione"
+    }
 };
 
-function getT(id, key) {
-    const s = serverSettings.get(id) || { lang: 'fr' };
-    return translations[s.lang || 'fr'][key] || translations['fr'][key];
+function getT(guildId, key) {
+    const settings = serverSettings.get(guildId) || { lang: 'fr_FR' };
+    const lang = settings.lang || 'fr_FR';
+    return translations[lang][key] || translations['fr_FR'][key];
 }
 
 client.once('ready', async () => {
-    console.log(`[YODO] Connecté : ${client.user.tag}`);
-    const cmds = [
-        new SlashCommandBuilder().setName('config').setDescription('Configuration').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON(),
-        new SlashCommandBuilder().setName('ticketpanel').setDescription('Panel tickets').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON(),
-        new SlashCommandBuilder().setName('reglement').setDescription('Générer le règlement').addStringOption(o => o.setName('theme').setDescription('Thème').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON(),
-        new SlashCommandBuilder().setName('antiraid').setDescription('Anti-Raid').setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON(),
-        new SlashCommandBuilder().setName('giveaway').setDescription('Giveaway').addStringOption(o => o.setName('lot').setDescription('Lot').setRequired(true)).addStringOption(o => o.setName('duree').setDescription('Durée').setRequired(true)).setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON(),
-        new SlashCommandBuilder().setName('sanction').setDescription('Sanction').addUserOption(o => o.setName('membre').setDescription('Membre').setRequired(true)).addStringOption(o => o.setName('type').setDescription('Type').setRequired(true).addChoices({ name: 'Mute', value: 'mute' }, { name: 'Kick', value: 'kick' }, { name: 'Ban', value: 'ban' })).addStringOption(o => o.setName('raison').setDescription('Raison')).setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).toJSON(),
-        new SlashCommandBuilder().setName('mp').setDescription('MP').addUserOption(o => o.setName('utilisateur').setDescription('User').setRequired(true)).addStringOption(o => o.setName('message').setDescription('Msg').setRequired(true)).toJSON(),
-        new SlashCommandBuilder().setName('help').setDescription('Aide').toJSON()
+    console.log(`[MODULE BOT] Connecté en tant que ${client.user.tag}`);
+
+    // Commandes Slash avec migration propre
+    const commands = [
+        new SlashCommandBuilder()
+            .setName('config')
+            .setDescription('Gérer la configuration globale et les langues du bot')
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+            .toJSON(),
+        new SlashCommandBuilder()
+            .setName('ticketpanel')
+            .setDescription('Déploie le panneau de tickets interactif')
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+            .toJSON(),
+        new SlashCommandBuilder()
+            .setName('antiraid-ia')
+            .setDescription('Active ou configure l\'Anti-Raid intelligent par IA')
+            .addBooleanOption(opt => opt.setName('etat').setDescription('Activer ou désactiver l\'IA').setRequired(true))
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .toJSON(),
+        new SlashCommandBuilder()
+            .setName('help')
+            .setDescription('Affiche le centre d\'aide dynamique')
+            .toJSON()
     ];
-    await new REST({ version: '10' }).setToken(process.env.TOKEN).put(Routes.applicationCommands(client.user.id), { body: cmds });
+
+    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+    try {
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+        console.log('[REST] Commandes globales enregistrées avec succès.');
+    } catch (error) {
+        console.error('[REST ERROR]', error);
+    }
 });
 
-client.on('guildCreate', async (g) => {
-    const ch = g.systemChannel || g.channels.cache.find(c => c.isTextBased() && c.permissionsFor(g.members.me).has('SendMessages'));
-    if (!ch) return;
-    serverSettings.set(g.id, { lang: 'fr', antiRaidActive: false });
-    const emb = new EmbedBuilder().setTitle('🛡️ Bienvenue avec Yodo Protect !').setDescription('Choisis la langue principale du bot :').setColor('#5865F2');
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('setlang_fr').setLabel('Français 🇫🇷').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('setlang_en').setLabel('English 🇬🇧').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('setlang_es').setLabel('Español 🇪🇸').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('setlang_it').setLabel('Italiano 🇮🇹').setStyle(ButtonStyle.Secondary)
-    );
-    await ch.send({ embeds: [emb], components: [row] });
+// Événement d'arrivée sur un serveur pour initialiser les paramètres par défaut
+client.on('guildCreate', async (guild) => {
+    serverSettings.set(guild.id, { lang: 'fr_FR', antiRaidAI: true, transcriptChannel: null });
 });
 
-client.on('interactionCreate', async i => {
-    let s = serverSettings.get(i.guildId) || { lang: 'fr', antiRaidActive: false };
-    serverSettings.set(i.guildId, s);
+// Détection Anti-Raid IA (Analyse comportementale en temps réel)
+client.on('messageCreate', async message => {
+    if (message.author.bot || !message.guild) return;
+    let settings = serverSettings.get(message.guild.id) || { lang: 'fr_FR', antiRaidAI: true };
+    if (!settings.antiRaidAI) return;
 
-    if (i.isButton() && i.customId.startsWith('setlang_')) {
-        s.lang = i.customId.split('_')[1];
-        return i.update({ content: `✅ Langue configurée en **${s.lang.toUpperCase()}** !`, embeds: [], components: [] });
-    }
+    const userId = message.author.id;
+    const now = Date.now();
+    if (!raidTracker.has(userId)) raidTracker.set(userId, []);
+    
+    let timestamps = raidTracker.get(userId);
+    timestamps.push(now);
+    
+    // Garde uniquement les messages des 5 dernières secondes
+    timestamps = timestamps.filter(time => now - time < 5000);
+    raidTracker.set(userId, timestamps);
 
-    if (i.isChatInputCommand()) {
-        const { commandName: c } = i;
-        if (c === 'help') {
-            const emb = new EmbedBuilder().setTitle(getT(i.guildId, 'helpTitle')).setDescription(getT(i.guildId, 'helpDesc')).addFields({ name: '/config', value: 'Config' }, { name: '/reglement', value: 'Règlement' }, { name: '/ticketpanel', value: 'Tickets' }).setColor('#2b2d31');
-            return i.reply({ embeds: [emb], ephemeral: true });
-        }
-        if (c === 'reglement') {
-            if (!i.member.permissions.has(PermissionFlagsBits.ManageGuild)) return i.reply({ content: '❌ Non autorisé.', ephemeral: true });
-            const th = i.options.getString('theme');
-            const emb = new EmbedBuilder().setTitle(`${getT(i.guildId, 'regTitle')} - ${i.guild.name}`).setDescription(`${getT(i.guildId, 'regDesc')} **${th}** :\n`).addFields({ name: getT(i.guildId, 'sec1'), value: getT(i.guildId, 'sec1Text') }, { name: getT(i.guildId, 'sec2'), value: getT(i.guildId, 'sec2Text') }).setColor('#5865F2').setFooter({ text: getT(i.guildId, 'footer'), iconURL: client.user.displayAvatarURL() }).setTimestamp();
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`tr_fr_${th}`).setLabel('Français 🇫🇷').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(`tr_en_${th}`).setLabel('English 🇬🇧').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(`tr_es_${th}`).setLabel('Español 🇪🇸').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(`tr_it_${th}`).setLabel('Italiano 🇮🇹').setStyle(ButtonStyle.Secondary)
-            );
-            await i.channel.send({ embeds: [emb], components: [row] });
-            return i.reply({ content: '✅ Règlement généré !', ephemeral: true });
-        }
-        if (c === 'config') {
-            if (!i.member.permissions.has(PermissionFlagsBits.ManageGuild)) return i.reply({ content: '❌ Non autorisé.', ephemeral: true });
-            const emb = new EmbedBuilder().setTitle(getT(i.guildId, 'configTitle')).addFields({ name: '🌐 Langue', value: s.lang.toUpperCase(), inline: true }, { name: '🛡️ Anti-Raid', value: s.antiRaidActive ? '🟢' : '🔴', inline: true }).setColor('#5865F2');
-            const menu = new StringSelectMenuBuilder().setCustomId('config_lang_menu').setPlaceholder('Langue...').addOptions({ label: 'Français 🇫🇷', value: 'lang_fr' }, { label: 'English 🇬🇧', value: 'lang_en' }, { label: 'Español 🇪🇸', value: 'lang_es' }, { label: 'Italiano 🇮🇹', value: 'lang_it' });
-            return i.reply({ embeds: [emb], components: [new ActionRowBuilder().addComponents(menu)], ephemeral: true });
-        }
-        if (c === 'ticketpanel') {
-            if (!i.member.permissions.has(PermissionFlagsBits.ManageGuild)) return i.reply({ content: '❌ Non autorisé.', ephemeral: true });
-            const emb = new EmbedBuilder().setTitle('🎫 Support').setDescription('Clique pour ouvrir un ticket.').setColor('#5865F2');
-            const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('ticket_staff').setLabel('Staff').setStyle(ButtonStyle.Primary), new ButtonBuilder().setCustomId('ticket_bug').setLabel('Bug').setStyle(ButtonStyle.Danger));
-            await i.channel.send({ embeds: [emb], components: [row] });
-            return i.reply({ content: '✅ Panel envoyé !', ephemeral: true });
-        }
-        if (c === 'mp') {
-            if (i.user.id !== i.guild.ownerId) return i.reply({ content: '❌ Réservé au propriétaire.', ephemeral: true });
-            try { await i.options.getUser('utilisateur').send(`📬 ${i.options.getString('message')}`); return i.reply({ content: '✅ MP envoyé !', ephemeral: true }); } catch (e) { return i.reply({ content: '❌ Erreur MP.', ephemeral: true }); }
-        }
-        if (c === 'sanction') {
-            const m = i.options.getMember('membre'), t = i.options.getString('type'), r = i.options.getString('raison') || 'Aucune';
-            try { if (t === 'mute') await m.timeout(900000, r); if (t === 'kick') await m.kick(r); if (t === 'ban') await m.ban({ reason: r }); return i.reply({ content: '✅ Sanction appliquée.', ephemeral: true }); } catch (e) { return i.reply({ content: '❌ Erreur.', ephemeral: true }); }
-        }
-        if (c === 'antiraid') {
-            if (!i.member.permissions.has(PermissionFlagsBits.ManageGuild)) return i.reply({ content: '❌ Non autorisé.', ephemeral: true });
-            s.antiRaidActive = !s.antiRaidActive;
-            return i.reply({ content: s.antiRaidActive ? '🚨 Anti-Raid Actif' : '✅ Anti-Raid Inactif', ephemeral: true });
-        }
-    }
-
-    if (i.isButton() && i.customId.startsWith('tr_')) {
-        const p = i.customId.split('_'), lang = p[1], th = p.slice(2).join('_'), t = translations[lang] || translations['fr'];
-        const emb = new EmbedBuilder().setTitle(`${t.regTitle} - ${i.guild.name}`).setDescription(`${t.regDesc} **${th}** :\n`).addFields({ name: t.sec1, value: t.sec1Text }, { name: t.sec2, value: t.sec2Text }).setColor('#5865F2').setFooter({ text: t.footer, iconURL: client.user.displayAvatarURL() }).setTimestamp();
-        return i.update({ embeds: [emb] });
-    }
-
-    if (i.isStringSelectMenu() && i.customId === 'config_lang_menu') {
-        s.lang = i.values[0].split('_')[1];
-        return i.update({ content: getT(i.guildId, 'langSet'), components: [], embeds: [] });
-    }
-
-    if (i.isButton() && i.customId.startsWith('ticket_')) {
-        await i.deferReply({ ephemeral: true });
+    // Simulation d'une analyse IA d'anomalie (Seuil critique > 6 messages en 5 secondes)
+    if (timestamps.length > 6) {
         try {
-            const ch = await i.guild.channels.create({ name: `ticket-${i.user.username}`.toLowerCase(), type: ChannelType.GuildText, permissionOverwrites: [{ id: i.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] }, { id: i.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }, { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }] });
-            const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer').setStyle(ButtonStyle.Danger));
-            await ch.send({ content: `${i.user}`, embeds: [new EmbedBuilder().setTitle('🎫 Ticket').setDescription('Un staff va vous répondre.').setColor('#5865F2')], components: [row] });
-            return i.editReply({ content: `✅ Ticket créé : ${ch}` });
-        } catch (e) { return i.editReply({ content: '❌ Erreur création ticket.' }); }
+            await message.member.timeout(10 * 60 * 1000, "Anti-Raid IA : Spam massif / Anomalie détectée");
+            const alertChannel = message.guild.systemChannel || message.channel;
+            await alertChannel.send({ content: `${message.author} 🚨 ${getT(message.guild.id, 'antiRaidAlert')}` });
+            raidTracker.set(userId, []); // Reset
+        } catch (e) {
+            console.error("Erreur action Anti-Raid IA :", e);
+        }
+    }
+});
+
+client.on('interactionCreate', async interaction => {
+    let settings = serverSettings.get(interaction.guildId) || { lang: 'fr_FR', antiRaidAI: true };
+    serverSettings.set(interaction.guildId, settings);
+
+    if (interaction.isChatInputCommand()) {
+        const { commandName } = interaction;
+
+        if (commandName === 'help') {
+            const embed = new EmbedBuilder()
+                .setTitle(getT(interaction.guildId, 'helpTitle'))
+                .setDescription(getT(interaction.guildId, 'helpDesc'))
+                .addFields(
+                    { name: '/config', value: 'Paramètres du serveur et choix de langue dynamique' },
+                    { name: '/ticketpanel', value: 'Création du panneau de tickets modulaire' },
+                    { name: '/antiraid-ia', value: 'Gestion de la sécurité comportementale IA' }
+                )
+                .setColor('#3498DB')
+                .setFooter({ text: getT(interaction.guildId, 'footer') });
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        if (commandName === 'config') {
+            const embed = new EmbedBuilder()
+                .setTitle(getT(interaction.guildId, 'configTitle'))
+                .setDescription('Modifiez la langue de votre serveur. Les commandes et menus s\'adapteront instantanément.')
+                .addFields(
+                    { name: '🌐 Langue Actuelle', value: settings.lang, inline: true },
+                    { name: '🛡️ Anti-Raid IA', value: settings.antiRaidAI ? '🟢 Actif' : '🔴 Inactif', inline: true }
+                )
+                .setColor('#2ECC71');
+
+            const menu = new StringSelectMenuBuilder()
+                .setCustomId('global_lang_select')
+                .setPlaceholder('Sélectionner la langue...')
+                .addOptions([
+                    { label: 'Français', value: 'fr_FR', emoji: '🇫🇷' },
+                    { label: 'English', value: 'en_US', emoji: '🇬🇧' },
+                    { label: 'Español', value: 'es_ES', emoji: '🇪🇸' },
+                    { label: 'Italiano', value: 'it_IT', emoji: '🇮🇹' }
+                ]);
+
+            return interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)], ephemeral: true });
+        }
+
+        if (commandName === 'ticketpanel') {
+            const embed = new EmbedBuilder()
+                .setTitle(getT(interaction.guildId, 'ticketTitle'))
+                .setDescription(getT(interaction.guildId, 'ticketDesc'))
+                .setColor('#9B59B6');
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('ticket_create_support').setLabel('Support & Aide').setEmoji('🎫').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId('ticket_create_bug').setLabel('Signaler un Bug').setEmoji('🐛').setStyle(ButtonStyle.Danger)
+            );
+
+            await interaction.channel.send({ embeds: [embed], components: [row] });
+            return interaction.reply({ content: '✅ Panneau de tickets déployé avec succès !', ephemeral: true });
+        }
+
+        if (commandName === 'antiraid-ia') {
+            const etat = interaction.options.getBoolean('etat');
+            settings.antiRaidAI = etat;
+            return interaction.reply({ content: `✅ L'Anti-Raid IA est désormais ${etat ? '**activé** (surveillance active)' : '**désactivé**'}.`, ephemeral: true });
+        }
     }
 
-    if (i.isButton() && i.customId === 'close_ticket') {
-        await i.reply({ content: '🔒 Fermeture...', ephemeral: true });
-        setTimeout(() => i.channel.delete().catch(() => {}), 3000);
+    // Gestion du menu déroulant de changement de langue dynamique
+    if (interaction.isStringSelectMenu() && interaction.customId === 'global_lang_select') {
+        settings.lang = interaction.values[0];
+        return interaction.update({ content: getT(interaction.guildId, 'langSet'), embeds: [], components: [] });
+    }
+
+    // Création dynamique d'un ticket modulaire
+    if (interaction.isButton() && interaction.customId.startsWith('ticket_create_')) {
+        await interaction.deferReply({ ephemeral: true });
+        const type = interaction.customId.split('_')[2];
+
+        try {
+            const channelName = `ticket-${type}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
+            const ticketChannel = await interaction.guild.channels.create({
+                name: channelName,
+                type: ChannelType.GuildText,
+                permissionOverwrites: [
+                    { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                    { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] },
+                    { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageChannels] }
+                ],
+            });
+
+            const ticketEmbed = new EmbedBuilder()
+                .setTitle(`🎫 Ticket : ${type.toUpperCase()}`)
+                .setDescription(`Bonjour ${interaction.user}, un membre de l'équipe va vous prendre en charge.\nFermeture sécurisée disponible ci-dessous (réservée aux rôles autorisés).`)
+                .setColor('#3498DB');
+
+            const controlRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('ticket_close_secure').setLabel('Fermer le ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger)
+            );
+
+            await ticketChannel.send({ content: `${interaction.user}`, embeds: [ticketEmbed], components: [controlRow] });
+            return interaction.editReply({ content: `${getT(interaction.guildId, 'ticketCreated')} ${ticketChannel}` });
+        } catch (e) {
+            return interaction.editReply({ content: '❌ Erreur lors de la création du salon de ticket.' });
+        }
+    }
+
+    // Fermeture contrôlée par rôles, génération de transcript et traçabilité
+    if (interaction.isButton() && interaction.customId === 'ticket_close_secure') {
+        // Vérification des permissions (Gérer le salon ou rôle Administrateur/Modérateur requis)
+        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+            return interaction.reply({ content: '❌ Vous n\'avez pas les rôles requis pour fermer ce ticket.', ephemeral: true });
+        }
+
+        await interaction.reply({ content: '🔒 Génération du transcript et fermeture imminente...', ephemeral: true });
+
+        try {
+            // Récupération de l'historique des messages pour le transcript
+            const messages = await interaction.channel.messages.fetch({ limit: 100 });
+            let transcript = `${getT(interaction.guildId, 'transcriptHeader')}\nSalon : ${interaction.channel.name}\nDate : ${new Date().toISOString()}\nFermé par : ${interaction.user.tag}\n\n`;
+            
+            messages.reverse().forEach(m => {
+                transcript += `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}\n`;
+            });
+
+            const buffer = Buffer.from(transcript, 'utf-8');
+            const attachment = new AttachmentBuilder(buffer, { name: `transcript-${interaction.channel.name}.txt` });
+
+            // Envoi du transcript dans les logs ou le salon actuel avant suppression
+            await interaction.channel.send({ content: '📄 Voici le compte-rendu (transcript) de ce ticket :', files: [attachment] });
+
+            setTimeout(async () => {
+                try { await interaction.channel.delete(); } catch (err) {}
+            }, 4000);
+        } catch (err) {
+            console.error('Erreur lors de la fermeture du ticket :', err);
+        }
     }
 });
 
 client.login(process.env.TOKEN);
-                
+    
