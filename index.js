@@ -1,8 +1,4 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, StringSelectMenuBuilder, PermissionFlagsBits, REST, Routes, ChannelType, PermissionsBitField, AttachmentBuilder } = require('discord.js');
-const { GoogleGenAI } = require('@google/genai');
-
-// Initialisation de l'API Gemini (utilise la variable d'environnement GEMINI_API_KEY)
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const client = new Client({
     intents: [
@@ -112,11 +108,9 @@ client.on('interactionCreate', async interaction => {
                 ],
             });
 
-            // On initialise l'historique de discussion pour l'IA dans ce salon
             ticketSteps.set(ticketChannel.id, { 
                 userId: interaction.user.id, 
-                motif: motif,
-                history: [] 
+                motif: motif 
             });
 
             const welcomeEmbed = new EmbedBuilder()
@@ -166,7 +160,37 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Gestion des messages avec l'IA Gemini
+// Fonction pour interroger Gemini via l'API REST native de Node.js
+async function askGemini(promptText, motif) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return "Clé API Gemini non configurée !";
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
+    const systemInstruction = `Tu es Yodo Protect, un assistant virtuel bienveillant, rassurant et à l'écoute sur Discord, spécialisé dans l'aide aux victimes de harcèlement ou de conflits. Le motif du ticket est : ${motif}. Ton rôle est de discuter avec l'utilisateur, de le mettre en confiance, de lui poser des questions douces pour comprendre la situation et de lui demander des preuves (captures d'écran, liens). Sois concis (maximum 2-3 phrases), chaleureux et utilise des émojis. IMPORTANT : Si tu estimes que l'utilisateur a suffisamment expliqué son problème ou qu'il y a une urgence, inclus le mot-clé exact [CONTACT_STAFF] à la fin de ta réponse.`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: promptText }] }],
+                systemInstruction: { parts: [{ text: systemInstruction }] }
+            })
+        });
+
+        const data = await response.json();
+        if (data.candidates && data.candidates[0].content.parts[0].text) {
+            return data.candidates[0].content.parts[0].text;
+        }
+        return "Je t'écoute, dis-moi m'en plus sur ce qui se passe.";
+    } catch (error) {
+        console.error('Erreur API Gemini:', error);
+        return "Oups, j'ai eu un petit souci technique, mais je suis là pour t'écouter.";
+    }
+}
+
+// Gestion des messages avec l'IA
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
@@ -174,54 +198,29 @@ client.on('messageCreate', async message => {
         const ticketData = ticketSteps.get(message.channel.id);
         const config = serverConfigs.get(message.guild.id) || { staffRoleId: null };
 
-        // Afficher un indicateur de frappe (le bot "écrit...")
         await message.channel.sendTyping();
 
-        try {
-            // On prépare le prompt pour Gemini avec le contexte
-            const systemInstruction = `Tu es Yodo Protect, un assistant virtuel bienveillant, rassurant et à l'écoute sur Discord, spécialisé dans l'aide aux victimes de harcèlement ou de conflits. 
-            Le motif du ticket est : ${ticketData.motif}.
-            Ton rôle est de discuter avec l'utilisateur, de le mettre en confiance, de lui poser des questions douces pour comprendre la situation, et de lui demander des preuves (captures d'écran, liens) si nécessaire.
-            Sois concis (maximum 2-3 phrases), chaleureux et utilise des émojis.
-            IMPORTANT : Si tu estimes que l'utilisateur a suffisamment expliqué son problème ou qu'il y a une urgence, inclus le mot-clé exact [CONTACT_STAFF] à la fin de ta réponse pour que le bot prévienne les modérateurs.`;
+        let replyText = await askGemini(message.content, ticketData.motif);
 
-            // Appel à l'API Gemini avec le modèle standard flash
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: message.content,
-                config: {
-                    systemInstruction: systemInstruction,
-                }
-            });
+        let notifyStaff = false;
+        if (replyText.includes('[CONTACT_STAFF]')) {
+            notifyStaff = true;
+            replyText = replyText.replace('[CONTACT_STAFF]', '').trim();
+        }
 
-            let replyText = response.text;
+        await message.reply(replyText);
 
-            // Vérifie si l'IA a décidé de contacter le staff
-            let notifyStaff = false;
-            if (replyText.includes('[CONTACT_STAFF]')) {
-                notifyStaff = true;
-                replyText = replyText.replace('[CONTACT_STAFF]', '').trim();
-            }
+        if (notifyStaff) {
+            let staffMention = config.staffRoleId ? `<@&${config.staffRoleId}>` : '**[Rôle Staff non configuré]**';
+            const staffEmbed = new EmbedBuilder()
+                .setTitle('🚨 Intervention du Staff demandée par l\'IA')
+                .setDescription('L\'assistant a analysé la situation et estimé qu\'un membre de l\'équipe doit intervenir pour aider cet utilisateur.')
+                .setColor('#2ECC71');
 
-            await message.reply(replyText);
-
-            // Si l'IA déclenche l'appel au staff
-            if (notifyStaff) {
-                let staffMention = config.staffRoleId ? `<@&${config.staffRoleId}>` : '**[Rôle Staff non configuré]**';
-                const staffEmbed = new EmbedBuilder()
-                    .setTitle('🚨 Intervention du Staff demandée par l\'IA')
-                    .setDescription('L\'assistant a analysé la situation et estimé qu\'un membre de l\'équipe doit intervenir pour aider cet utilisateur.')
-                    .setColor('#2ECC71');
-
-                await message.channel.send({ content: `${staffMention}`, embeds: [staffEmbed] });
-            }
-
-        } catch (error) {
-            console.error('Erreur Gemini:', error);
-            await message.reply('Oups, j\'ai eu un petit problème de connexion neuronale, mais je t\'écoute toujours !');
+            await message.channel.send({ content: `${staffMention}`, embeds: [staffEmbed] });
         }
     }
 });
 
 client.login(process.env.TOKEN);
-            
+          
