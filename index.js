@@ -160,7 +160,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Fonction pour interroger Groq
+// Fonction pour interroger Groq avec le modèle stable
 async function askGroq(promptText, motif) {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) return "Clé API Groq non configurée !";
@@ -177,7 +177,7 @@ async function askGroq(promptText, motif) {
                 'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
-                model: "llama3-8b-8192",
+                model: "llama-3.1-8b-instant",
                 messages: [
                     { role: "system", content: systemInstructionText },
                     { role: "user", content: promptText }
@@ -235,4 +235,3 @@ client.on('messageCreate', async message => {
 });
 
 client.login(process.env.TOKEN);
-        
