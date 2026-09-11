@@ -177,12 +177,6 @@ client.on('interactionCreate', async interaction => {
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
-    // Détection basique d'une salutation si quelqu'un écrit "bonjour", "salut", "hey", etc. dans un salon normal
-    const contentLower = message.content.toLowerCase();
-    if (contentLower.includes('bonjour') || contentLower.includes('salut') || contentLower.includes('hey') || contentLower.includes('coucou')) {
-        // Optionnel : tu peux laisser le bot répondre s'il est interpellé, mais concentrons-nous sur les tickets pour l'anti-harcèlement.
-    }
-
     // Si on est dans un salon de ticket géré par le bot
     if (ticketSteps.has(message.channel.id)) {
         const state = ticketSteps.get(message.channel.id);
@@ -194,10 +188,10 @@ client.on('messageCreate', async message => {
             
             const replyEmbed = new EmbedBuilder()
                 .setTitle('🔍 Analyse & Suivi')
-                .setDescription('J\'ai bien pris note de ta situation. C\'est courageux de t'exprimer.\n\nPour que l\'équipe puisse agir efficacement, **peux-tu nous fournir des preuves** (captures d\'écran des messages, des profils concernés, des liens ou des détails supplémentaires) ?')
+                .setDescription(`J'ai bien pris note de ta situation. C'est courageux de t'exprimer.\n\nPour que l'équipe puisse agir efficacement, **peux-tu nous fournir des preuves** (captures d'écran des messages, des profils concernés, des liens ou des détails supplémentaires) ?`)
                 .setColor('#FFA500');
 
-            return message.reply({ embeds: [replyEmbed] });
+            return message.reply({ embeds: [replyEdge = replyEmbed] }); // Corrigé ici aussi
         }
         else if (state.step === 'waiting_proofs') {
             // Le membre a envoyé les preuves, le bot valide et contacte le staff en mentionnant le rôle configuré
@@ -207,7 +201,7 @@ client.on('messageCreate', async message => {
 
             const finalEmbed = new EmbedBuilder()
                 .setTitle('🚨 Équipe prévenue')
-                .setDescription('Merci, j\'ai bien enregistré les éléments et les preuves transmises.\n\n**Je contacte l\'équipe staff immédiatement !** Un modérateur va arriver dans cet espace pour t'aider en toute sécurité.')
+                .setDescription(`Merci, j'ai bien enregistré les éléments et les preuves transmises.\n\n**Je contacte l'équipe staff immédiatement !** Un modérateur va arriver dans cet espace pour t'aider en toute sécurité.`)
                 .setColor('#2ECC71');
 
             await message.reply({ content: `${staffMention}`, embeds: [finalEmbed] });
@@ -216,4 +210,4 @@ client.on('messageCreate', async message => {
 });
 
 client.login(process.env.TOKEN);
-                                                                         
+    
