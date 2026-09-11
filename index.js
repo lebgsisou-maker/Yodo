@@ -1,4 +1,8 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, StringSelectMenuBuilder, PermissionFlagsBits, REST, Routes, ChannelType, PermissionsBitField, AttachmentBuilder } = require('discord.js');
+const { GoogleGenAI } = require('@google/genai');
+
+// Initialisation de l'API Gemini (utilise la variable d'environnement GEMINI_API_KEY)
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const client = new Client({
     intents: [
@@ -10,13 +14,11 @@ const client = new Client({
     ]
 });
 
-// Stockage des configurations par serveur (Rôle staff à mentionner, etc.)
 const serverConfigs = new Map();
-// Suivi de l'étape des tickets en cours (pour guider l'utilisateur : problème -> preuves -> staff)
 const ticketSteps = new Map();
 
 client.once('ready', async () => {
-    console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt à lutter contre le harcèlement.`);
+    console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt avec l'IA.`);
 
     const commands = [
         new SlashCommandBuilder()
@@ -55,11 +57,7 @@ client.on('interactionCreate', async interaction => {
         if (commandName === 'help') {
             const embed = new EmbedBuilder()
                 .setTitle('🛡️ Yodo Protect - Centre d\'Aide')
-                .setDescription('Je suis un bot dédié à la protection, à l\'écoute et à la lutte contre le harcèlement.')
-                .addFields(
-                    { name: '/ticketpanel', value: 'Envoyer le panneau de signalement / contact' },
-                    { name: '/setstaffrole', value: 'Définir quel rôle de staff mentionner lors des urgences' }
-                )
+                .setDescription('Je suis un bot intelligent dédié à la protection et à l\'écoute.')
                 .setColor('#5865F2');
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
@@ -70,7 +68,7 @@ client.on('interactionCreate', async interaction => {
             }
             const role = interaction.options.getRole('role');
             config.staffRoleId = role.id;
-            return interaction.reply({ content: `✅ Le rôle staff à mentionner a été défini sur **${role.name}** !`, ephemeral: true });
+            return interaction.reply({ content: `✅ Le rôle staff a été défini sur **${role.name}** !`, ephemeral: true });
         }
 
         if (commandName === 'ticketpanel') {
@@ -80,25 +78,24 @@ client.on('interactionCreate', async interaction => {
 
             const embed = new EmbedBuilder()
                 .setTitle('🛡️ Espace d\'écoute & Signalement - Yodo Protect')
-                .setDescription('Victime ou témoin de harcèlement, de toxicité ou d\'un problème sur le serveur ?\n\n*Ne reste pas seul(e), sélectionne une option dans le menu ci-dessous pour ouvrir un espace d\'échange 100% sécurisé et confidentiel avec l\'équipe.*')
+                .setDescription('Victime ou témoin de harcèlement ou d\'un problème ?\n\n*Sélectionne une option pour ouvrir un espace sécurisé avec notre assistant virtuel et l\'équipe.*')
                 .setColor('#FF6B6B');
 
             const menu = new StringSelectMenuBuilder()
                 .setCustomId('ticket_select_menu')
-                .setPlaceholder('Choisis le motif de ton message...')
+                .setPlaceholder('Choisis le motif...')
                 .addOptions([
                     { label: 'Harcèlement / Cyberharcèlement', value: 'harcelement', emoji: '🚨', description: 'Insultes, menaces, acharnement...' },
                     { label: 'Problème / Conflit entre membres', value: 'conflit', emoji: '⚠️', description: 'Tensions, disputes sur le serveur' },
-                    { label: 'Aide / Question générale', value: 'autre', emoji: '💬', description: 'Besoin d\'un renseignement ou de parler' }
+                    { label: 'Aide / Question générale', value: 'autre', emoji: '💬', description: 'Besoin d\'un renseignement' }
                 ]);
 
             const row = new ActionRowBuilder().addComponents(menu);
             await interaction.channel.send({ embeds: [embed], components: [row] });
-            return interaction.reply({ content: '✅ Panel de tickets envoyé avec succès !', ephemeral: true });
+            return interaction.reply({ content: '✅ Panel envoyé !', ephemeral: true });
         }
     }
 
-    // Gestion du menu déroulant (Sélection du motif)
     if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select_menu') {
         await interaction.deferReply({ ephemeral: true });
         const motif = interaction.values[0];
@@ -115,12 +112,16 @@ client.on('interactionCreate', async interaction => {
                 ],
             });
 
-            // On enregistre l'état initial du ticket pour ce salon
-            ticketSteps.set(ticketChannel.id, { step: 'waiting_problem', userId: interaction.user.id });
+            // On initialise l'historique de discussion pour l'IA dans ce salon
+            ticketSteps.set(ticketChannel.id, { 
+                userId: interaction.user.id, 
+                motif: motif,
+                history: [] 
+            });
 
             const welcomeEmbed = new EmbedBuilder()
-                .setTitle('💬 Espace d\'écoute sécurisé')
-                .setDescription(`Bonjour ${interaction.user} ! 👋\nJ'ai bien reçu ta demande concernant : **${motif.toUpperCase()}**.\n\nPrends ton temps, dis-nous : **quel problème est-ce que tu rencontres ?**`)
+                .setTitle('💬 Espace d\'écoute intelligent')
+                .setDescription(`Bonjour ${interaction.user} ! 👋\nJ'ai bien reçu ta demande concernant : **${motif.toUpperCase()}**.\n\nDis-moi tout, je t'écoute et je suis là pour t'aider.`)
                 .setColor('#5865F2');
 
             const closeRow = new ActionRowBuilder().addComponents(
@@ -128,20 +129,18 @@ client.on('interactionCreate', async interaction => {
             );
 
             await ticketChannel.send({ content: `${interaction.user}`, embeds: [welcomeEmbed], components: [closeRow] });
-            return interaction.editReply({ content: `✅ Ton espace sécurisé a été créé : ${ticketChannel}` });
+            return interaction.editReply({ content: `✅ Espace créé : ${ticketChannel}` });
         } catch (e) {
-            return interaction.editReply({ content: `❌ Erreur lors de la création de l'espace.` });
+            return interaction.editReply({ content: `❌ Erreur lors de la création.` });
         }
     }
 
-    // Bouton de fermeture de ticket
     if (interaction.isButton() && interaction.customId === 'close_ticket') {
-        await interaction.reply({ content: '🔒 Fermeture de l\'espace et génération du transcript...', ephemeral: true });
+        await interaction.reply({ content: '🔒 Fermeture et génération du transcript...', ephemeral: true });
 
         try {
             const messages = await interaction.channel.messages.fetch({ limit: 100 });
-            let transcript = `--- TRANSCRIPT / RAPPORT D'ÉCOUTE ---\nSalon : ${interaction.channel.name}\nDate : ${new Date().toLocaleString()}\n\n`;
-            
+            let transcript = `--- TRANSCRIPT ---\nSalon : ${interaction.channel.name}\nDate : ${new Date().toLocaleString()}\n\n`;
             messages.reverse().forEach(m => {
                 transcript += `[${new Date(m.createdTimestamp).toLocaleTimeString()}] ${m.author.tag}: ${m.content}\n`;
             });
@@ -149,18 +148,12 @@ client.on('interactionCreate', async interaction => {
             const buffer = Buffer.from(transcript, 'utf-8');
             const attachment = new AttachmentBuilder(buffer, { name: `transcript-${interaction.channel.name}.txt` });
 
-            // Envoi du transcript en Message Privé à l'utilisateur qui ferme/ouvre le ticket si possible, ou dans le salon avant suppression
-            try {
-                const ownerId = ticketSteps.get(interaction.channel.id)?.userId;
-                if (ownerId) {
-                    const memberTarget = await interaction.guild.members.fetch(ownerId).catch(() => null);
-                    if (memberTarget) {
-                        await memberTarget.send({ content: '📄 Voici le compte-rendu de ton échange avec l\'équipe (transcript) :', files: [attachment] });
-                    }
+            const ownerId = ticketSteps.get(interaction.channel.id)?.userId;
+            if (ownerId) {
+                const memberTarget = await interaction.guild.members.fetch(ownerId).catch(() => null);
+                if (memberTarget) {
+                    await memberTarget.send({ content: '📄 Ton compte-rendu :', files: [attachment] }).catch(() => {});
                 }
-            } catch (err) {
-                // Si les MP sont fermés, on l'envoie directement dans le salon
-                await interaction.channel.send({ content: '📄 Compte-rendu de l\'échange :', files: [attachment] });
             }
 
             ticketSteps.delete(interaction.channel.id);
@@ -173,41 +166,62 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Écouteur de messages dans les salons de tickets pour guider l'utilisateur
+// Gestion des messages avec l'IA Gemini
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
-    // Si on est dans un salon de ticket géré par le bot
     if (ticketSteps.has(message.channel.id)) {
-        const state = ticketSteps.get(message.channel.id);
+        const ticketData = ticketSteps.get(message.channel.id);
         const config = serverConfigs.get(message.guild.id) || { staffRoleId: null };
 
-        if (state.step === 'waiting_problem') {
-            // Le membre vient d'expliquer son problème, le bot analyse/répond et demande les preuves
-            state.step = 'waiting_proofs';
-            
-            const replyEmbed = new EmbedBuilder()
-                .setTitle('🔍 Analyse & Suivi')
-                .setDescription(`J'ai bien pris note de ta situation. C'est courageux de t'exprimer.\n\nPour que l'équipe puisse agir efficacement, **peux-tu nous fournir des preuves** (captures d'écran des messages, des profils concernés, des liens ou des détails supplémentaires) ?`)
-                .setColor('#FFA500');
+        // Afficher un indicateur de frappe (le bot "écrit...")
+        await message.channel.sendTyping();
 
-            return message.reply({ embeds: [replyEdge = replyEmbed] }); // Corrigé ici aussi
-        }
-        else if (state.step === 'waiting_proofs') {
-            // Le membre a envoyé les preuves, le bot valide et contacte le staff en mentionnant le rôle configuré
-            state.step = 'staff_notified';
+        try {
+            // On prépare le prompt pour Gemini avec le contexte
+            const systemInstruction = `Tu es Yodo Protect, un assistant virtuel bienveillant, rassurant et à l'écoute sur Discord, spécialisé dans l'aide aux victimes de harcèlement ou de conflits. 
+            Le motif du ticket est : ${ticketData.motif}.
+            Ton rôle est de discuter avec l'utilisateur, de le mettre en confiance, de lui poser des questions douces pour comprendre la situation, et de lui demander des preuves (captures d'écran, liens) si nécessaire.
+            Sois concis (maximum 2-3 phrases), chaleureux et utilise des émojis.
+            IMPORTANT : Si tu estimes que l'utilisateur a suffisamment expliqué son problème ou qu'il y a une urgence, inclus le mot-clé exact [CONTACT_STAFF] à la fin de ta réponse pour que le bot prévienne les modérateurs.`;
 
-            let staffMention = config.staffRoleId ? `<@&${config.staffRoleId}>` : '**[Rôle Staff non configuré - Utilisez /setstaffrole]**';
+            // Appel à l'API Gemini avec le modèle standard flash
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: message.content,
+                config: {
+                    systemInstruction: systemInstruction,
+                }
+            });
 
-            const finalEmbed = new EmbedBuilder()
-                .setTitle('🚨 Équipe prévenue')
-                .setDescription(`Merci, j'ai bien enregistré les éléments et les preuves transmises.\n\n**Je contacte l'équipe staff immédiatement !** Un modérateur va arriver dans cet espace pour t'aider en toute sécurité.`)
-                .setColor('#2ECC71');
+            let replyText = response.text;
 
-            await message.reply({ content: `${staffMention}`, embeds: [finalEmbed] });
+            // Vérifie si l'IA a décidé de contacter le staff
+            let notifyStaff = false;
+            if (replyText.includes('[CONTACT_STAFF]')) {
+                notifyStaff = true;
+                replyText = replyText.replace('[CONTACT_STAFF]', '').trim();
+            }
+
+            await message.reply(replyText);
+
+            // Si l'IA déclenche l'appel au staff
+            if (notifyStaff) {
+                let staffMention = config.staffRoleId ? `<@&${config.staffRoleId}>` : '**[Rôle Staff non configuré]**';
+                const staffEmbed = new EmbedBuilder()
+                    .setTitle('🚨 Intervention du Staff demandée par l\'IA')
+                    .setDescription('L\'assistant a analysé la situation et estimé qu\'un membre de l\'équipe doit intervenir pour aider cet utilisateur.')
+                    .setColor('#2ECC71');
+
+                await message.channel.send({ content: `${staffMention}`, embeds: [staffEmbed] });
+            }
+
+        } catch (error) {
+            console.error('Erreur Gemini:', error);
+            await message.reply('Oups, j\'ai eu un petit problème de connexion neuronale, mais je t\'écoute toujours !');
         }
     }
 });
 
 client.login(process.env.TOKEN);
-    
+            
