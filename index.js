@@ -14,7 +14,7 @@ const serverConfigs = new Map();
 const ticketSteps = new Map();
 
 client.once('ready', async () => {
-    console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt avec l'IA.`);
+    console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt avec Groq.`);
 
     const commands = [
         new SlashCommandBuilder()
@@ -160,47 +160,49 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Fonction pour interroger Gemini via l'API REST native de Node.js
-async function askGemini(promptText, motif) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return "Clé API Gemini non configurée !";
+// Fonction pour interroger Groq
+async function askGroq(promptText, motif) {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) return "Clé API Groq non configurée !";
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = "https://api.groq.com/openai/v1/chat/completions";
 
     const systemInstructionText = `Tu es Yodo Protect, un assistant virtuel bienveillant, rassurant et à l'écoute sur Discord, spécialisé dans l'aide aux victimes de harcèlement ou de conflits. Le motif du ticket est : ${motif}. Ton rôle est de discuter avec l'utilisateur, de le mettre en confiance, de lui poser des questions douces pour comprendre la situation et de lui demander des preuves (captures d'écran, liens). Sois concis (maximum 2-3 phrases), chaleureux et utilise des émojis. IMPORTANT : Si tu estimes que l'utilisateur a suffisamment expliqué son problème ou qu'il y a une urgence, inclus le mot-clé exact [CONTACT_STAFF] à la fin de ta réponse.`;
 
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
             body: JSON.stringify({
-                system_instruction: {
-                    parts: [{ text: systemInstructionText }]
-                },
-                contents: [{
-                    parts: [{ text: promptText }]
-                }]
+                model: "llama3-8b-8192",
+                messages: [
+                    { role: "system", content: systemInstructionText },
+                    { role: "user", content: promptText }
+                ]
             })
         });
 
         const data = await response.json();
         
         if (data.error) {
-            console.error("Erreur renvoyée par l'API Google :", JSON.stringify(data.error));
-            return `Erreur API : ${data.error.message || 'Problème de clé ou de quota'}`;
+            console.error("Erreur Groq :", JSON.stringify(data.error));
+            return `Erreur API Groq : ${data.error.message || 'Problème inconnu'}`;
         }
 
-        if (data.candidates && data.candidates[0].content.parts[0].text) {
-            return data.candidates[0].content.parts[0].text;
+        if (data.choices && data.choices[0].message.content) {
+            return data.choices[0].message.content;
         }
         return "Je t'écoute, raconte-moi ce qui se passe.";
     } catch (error) {
-        console.error('Erreur technique fetch Gemini:', error);
+        console.error('Erreur technique fetch Groq:', error);
         return "Oups, j'ai eu un petit souci de connexion, mais je suis là.";
     }
 }
 
-// Gestion des messages avec l'IA
+// Gestion des messages avec l'IA Groq
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
@@ -210,7 +212,7 @@ client.on('messageCreate', async message => {
 
         await message.channel.sendTyping();
 
-        let replyText = await askGemini(message.content, ticketData.motif);
+        let replyText = await askGroq(message.content, ticketData.motif);
 
         let notifyStaff = false;
         if (replyText.includes('[CONTACT_STAFF]')) {
@@ -233,3 +235,4 @@ client.on('messageCreate', async message => {
 });
 
 client.login(process.env.TOKEN);
+        
