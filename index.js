@@ -167,30 +167,33 @@ async function askGemini(promptText, motif) {
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-    const systemInstruction = `Tu es Yodo Protect, un assistant virtuel bienveillant, rassurant et à l'écoute sur Discord, spécialisé dans l'aide aux victimes de harcèlement ou de conflits. Le motif du ticket est : ${motif}. Ton rôle est de discuter avec l'utilisateur, de le mettre en confiance, de lui poser des questions douces pour comprendre la situation et de lui demander des preuves (captures d'écran, liens). Sois concis (maximum 2-3 phrases), chaleureux et utilise des émojis. IMPORTANT : Si tu estimes que l'utilisateur a suffisamment expliqué son problème ou qu'il y a une urgence, inclus le mot-clé exact [CONTACT_STAFF] à la fin de ta réponse.`;
+    const systemInstructionText = `Tu es Yodo Protect, un assistant virtuel bienveillant, rassurant et à l'écoute sur Discord, spécialisé dans l'aide aux victimes de harcèlement ou de conflits. Le motif du ticket est : ${motif}. Ton rôle est de discuter avec l'utilisateur, de le mettre en confiance, de lui poser des questions douces pour comprendre la situation et de lui demander des preuves (captures d'écran, liens). Sois concis (maximum 2-3 phrases), chaleureux et utilise des émojis. IMPORTANT : Si tu estimes que l'utilisateur a suffisamment expliqué son problème ou qu'il y a une urgence, inclus le mot-clé exact [CONTACT_STAFF] à la fin de ta réponse.`;
 
     try {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                contents: [
-                    { role: "user", parts: [{ text: systemInstruction + "\n\nMessage de l'utilisateur : " + promptText }] }
-                ]
+                system_instruction: {
+                    parts: [{ text: systemInstructionText }]
+                },
+                contents: [{
+                    parts: [{ text: promptText }]
+                }]
             })
         });
 
         const data = await response.json();
         
         if (data.error) {
-            console.error("Erreur renvoyée par l'API Google :", data.error);
-            return "Oups, l'API Gemini a rencontré un souci. Vérifie ta clé API !";
+            console.error("Erreur renvoyée par l'API Google :", JSON.stringify(data.error));
+            return `Erreur API : ${data.error.message || 'Problème de clé ou de quota'}`;
         }
 
         if (data.candidates && data.candidates[0].content.parts[0].text) {
             return data.candidates[0].content.parts[0].text;
         }
-        return "Je comprends, raconte-moi un peu plus ce qui se passe pour que je puisse t'aider.";
+        return "Je t'écoute, raconte-moi ce qui se passe.";
     } catch (error) {
         console.error('Erreur technique fetch Gemini:', error);
         return "Oups, j'ai eu un petit souci de connexion, mais je suis là.";
