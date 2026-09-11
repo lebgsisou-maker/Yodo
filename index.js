@@ -10,219 +10,101 @@ const client = new Client({
     ]
 });
 
-// Stockage en mémoire des configurations par serveur (Langue, Anti-Raid IA, Rôles autorisés)
-const serverSettings = new Map();
-// Suivi anti-raid (comptage des messages pour détecter l'anomalie de spam)
-const raidTracker = new Map();
-
-// Traductions dynamiques et gestion des textes / descriptions
-const translations = {
-    fr_FR: {
-        helpTitle: "📜 Centre d'Aide Avancé - Bot Modulaire",
-        helpDesc: "Voici la liste officielle des commandes disponibles :",
-        configTitle: "⚙️ Panneau de Configuration Global",
-        langSet: "✅ Langue du bot mise à jour en **Français (fr_FR)** !",
-        ticketTitle: "🎫 Support & Billetterie",
-        ticketDesc: "Besoin d'assistance ? Sélectionnez une catégorie ci-dessous pour ouvrir un ticket sécurisé.",
-        ticketCreated: "✅ Votre ticket a été ouvert avec succès :",
-        transcriptHeader: "--- TRANSCRIPT DU TICKET ---",
-        antiRaidAlert: "🚨 **Alerte Anti-Raid IA** : Anomalie détectée ! Des mesures de protection automatiques ont été activées.",
-        footer: "Système modulaire de sécurité et de gestion"
-    },
-    en_US: {
-        helpTitle: "📜 Advanced Help Center - Modular Bot",
-        helpDesc: "Here is the official list of available commands:",
-        configTitle: "⚙️ Global Configuration Panel",
-        langSet: "✅ Bot language updated to **English (en_US)**!",
-        ticketTitle: "🎫 Support & Ticketing",
-        ticketDesc: "Need assistance? Select a category below to open a secure ticket.",
-        ticketCreated: "✅ Your ticket has been successfully opened:",
-        transcriptHeader: "--- TICKET TRANSCRIPT ---",
-        antiRaidAlert: "🚨 **AI Anti-Raid Alert**: Anomaly detected! Automatic protection measures have been triggered.",
-        footer: "Modular security and management system"
-    },
-    es_ES: {
-        helpTitle: "📜 Centro de Ayuda Avanzado - Bot Modular",
-        helpDesc: "Aquí está la lista oficial de comandos disponibles:",
-        configTitle: "⚙️ Panel de Configuración Global",
-        langSet: "✅ ¡Idioma actualizado a **Español (es_ES)**!",
-        ticketTitle: "🎫 Soporte y Tickets",
-        ticketDesc: "¿Necesitas ayuda? Selecciona una categoría abajo para abrir un ticket seguro.",
-        ticketCreated: "✅ Tu ticket se ha abierto con éxito:",
-        transcriptHeader: "--- TRANSCRIPT DEL TICKET ---",
-        antiRaidAlert: "🚨 **Alerta Anti-Raid IA**: ¡Anomalía detectada! Se han activado medidas automáticas.",
-        footer: "Sistema modular de seguridad y gestión"
-    },
-    it_IT: {
-        helpTitle: "📜 Centro Assistenza Avanzato - Bot Modulare",
-        helpDesc: "Ecco l'elenco ufficiale dei comandi disponibili:",
-        configTitle: "⚙️ Pannello di Configurazione Globale",
-        langSet: "✅ Lingua aggiornata in **Italiano (it_IT)**!",
-        ticketTitle: "🎫 Supporto e Ticket",
-        ticketDesc: "Hai bisogno di assistenza? Seleziona una categoria qui sotto per aprire un ticket.",
-        ticketCreated: "✅ Il tuo ticket è stato aperto con successo:",
-        transcriptHeader: "--- TRANSCRIPT DEL TICKET ---",
-        antiRaidAlert: "🚨 **Allerta Anti-Raid IA**: Anomalia rilevata! Misure di protezione attivate.",
-        footer: "Sistema modulare di sicurezza e gestione"
-    }
-};
-
-function getT(guildId, key) {
-    const settings = serverSettings.get(guildId) || { lang: 'fr_FR' };
-    const lang = settings.lang || 'fr_FR';
-    return translations[lang][key] || translations['fr_FR'][key];
-}
+// Stockage des configurations par serveur (Rôle staff à mentionner, etc.)
+const serverConfigs = new Map();
+// Suivi de l'étape des tickets en cours (pour guider l'utilisateur : problème -> preuves -> staff)
+const ticketSteps = new Map();
 
 client.once('ready', async () => {
-    console.log(`[MODULE BOT] Connecté en tant que ${client.user.tag}`);
+    console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt à lutter contre le harcèlement.`);
 
-    // Commandes Slash avec migration propre
     const commands = [
         new SlashCommandBuilder()
-            .setName('config')
-            .setDescription('Gérer la configuration globale et les langues du bot')
-            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-            .toJSON(),
-        new SlashCommandBuilder()
             .setName('ticketpanel')
-            .setDescription('Déploie le panneau de tickets interactif')
+            .setDescription('Envoyer le panel de tickets de signalement / aide')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
-            .setName('antiraid-ia')
-            .setDescription('Active ou configure l\'Anti-Raid intelligent par IA')
-            .addBooleanOption(opt => opt.setName('etat').setDescription('Activer ou désactiver l\'IA').setRequired(true))
-            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .setName('setstaffrole')
+            .setDescription('Définir le rôle du staff à mentionner lors d\'un signalement')
+            .addRoleOption(option => option.setName('role').setDescription('Le rôle du staff').setRequired(true))
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
             .setName('help')
-            .setDescription('Affiche le centre d\'aide dynamique')
+            .setDescription('Afficher l\'aide de Yodo Protect')
             .toJSON()
     ];
 
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('[REST] Commandes globales enregistrées avec succès.');
+        console.log('[COMMANDES] Enregistrées avec succès !');
     } catch (error) {
-        console.error('[REST ERROR]', error);
-    }
-});
-
-// Événement d'arrivée sur un serveur pour initialiser les paramètres par défaut
-client.on('guildCreate', async (guild) => {
-    serverSettings.set(guild.id, { lang: 'fr_FR', antiRaidAI: true, transcriptChannel: null });
-});
-
-// Détection Anti-Raid IA (Analyse comportementale en temps réel)
-client.on('messageCreate', async message => {
-    if (message.author.bot || !message.guild) return;
-    let settings = serverSettings.get(message.guild.id) || { lang: 'fr_FR', antiRaidAI: true };
-    if (!settings.antiRaidAI) return;
-
-    const userId = message.author.id;
-    const now = Date.now();
-    if (!raidTracker.has(userId)) raidTracker.set(userId, []);
-    
-    let timestamps = raidTracker.get(userId);
-    timestamps.push(now);
-    
-    // Garde uniquement les messages des 5 dernières secondes
-    timestamps = timestamps.filter(time => now - time < 5000);
-    raidTracker.set(userId, timestamps);
-
-    // Simulation d'une analyse IA d'anomalie (Seuil critique > 6 messages en 5 secondes)
-    if (timestamps.length > 6) {
-        try {
-            await message.member.timeout(10 * 60 * 1000, "Anti-Raid IA : Spam massif / Anomalie détectée");
-            const alertChannel = message.guild.systemChannel || message.channel;
-            await alertChannel.send({ content: `${message.author} 🚨 ${getT(message.guild.id, 'antiRaidAlert')}` });
-            raidTracker.set(userId, []); // Reset
-        } catch (e) {
-            console.error("Erreur action Anti-Raid IA :", e);
-        }
+        console.error('[ERREUR COMMANDES]', error);
     }
 });
 
 client.on('interactionCreate', async interaction => {
-    let settings = serverSettings.get(interaction.guildId) || { lang: 'fr_FR', antiRaidAI: true };
-    serverSettings.set(interaction.guildId, settings);
+    let config = serverConfigs.get(interaction.guildId) || { staffRoleId: null };
+    serverConfigs.set(interaction.guildId, config);
 
     if (interaction.isChatInputCommand()) {
         const { commandName } = interaction;
 
         if (commandName === 'help') {
             const embed = new EmbedBuilder()
-                .setTitle(getT(interaction.guildId, 'helpTitle'))
-                .setDescription(getT(interaction.guildId, 'helpDesc'))
+                .setTitle('🛡️ Yodo Protect - Centre d\'Aide')
+                .setDescription('Je suis un bot dédié à la protection, à l\'écoute et à la lutte contre le harcèlement.')
                 .addFields(
-                    { name: '/config', value: 'Paramètres du serveur et choix de langue dynamique' },
-                    { name: '/ticketpanel', value: 'Création du panneau de tickets modulaire' },
-                    { name: '/antiraid-ia', value: 'Gestion de la sécurité comportementale IA' }
+                    { name: '/ticketpanel', value: 'Envoyer le panneau de signalement / contact' },
+                    { name: '/setstaffrole', value: 'Définir quel rôle de staff mentionner lors des urgences' }
                 )
-                .setColor('#3498DB')
-                .setFooter({ text: getT(interaction.guildId, 'footer') });
+                .setColor('#5865F2');
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
 
-        if (commandName === 'config') {
-            const embed = new EmbedBuilder()
-                .setTitle(getT(interaction.guildId, 'configTitle'))
-                .setDescription('Modifiez la langue de votre serveur. Les commandes et menus s\'adapteront instantanément.')
-                .addFields(
-                    { name: '🌐 Langue Actuelle', value: settings.lang, inline: true },
-                    { name: '🛡️ Anti-Raid IA', value: settings.antiRaidAI ? '🟢 Actif' : '🔴 Inactif', inline: true }
-                )
-                .setColor('#2ECC71');
-
-            const menu = new StringSelectMenuBuilder()
-                .setCustomId('global_lang_select')
-                .setPlaceholder('Sélectionner la langue...')
-                .addOptions([
-                    { label: 'Français', value: 'fr_FR', emoji: '🇫🇷' },
-                    { label: 'English', value: 'en_US', emoji: '🇬🇧' },
-                    { label: 'Español', value: 'es_ES', emoji: '🇪🇸' },
-                    { label: 'Italiano', value: 'it_IT', emoji: '🇮🇹' }
-                ]);
-
-            return interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)], ephemeral: true });
+        if (commandName === 'setstaffrole') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
+            }
+            const role = interaction.options.getRole('role');
+            config.staffRoleId = role.id;
+            return interaction.reply({ content: `✅ Le rôle staff à mentionner a été défini sur **${role.name}** !`, ephemeral: true });
         }
 
         if (commandName === 'ticketpanel') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
+            }
+
             const embed = new EmbedBuilder()
-                .setTitle(getT(interaction.guildId, 'ticketTitle'))
-                .setDescription(getT(interaction.guildId, 'ticketDesc'))
-                .setColor('#9B59B6');
+                .setTitle('🛡️ Espace d\'écoute & Signalement - Yodo Protect')
+                .setDescription('Victime ou témoin de harcèlement, de toxicité ou d\'un problème sur le serveur ?\n\n*Ne reste pas seul(e), sélectionne une option dans le menu ci-dessous pour ouvrir un espace d\'échange 100% sécurisé et confidentiel avec l\'équipe.*')
+                .setColor('#FF6B6B');
 
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('ticket_create_support').setLabel('Support & Aide').setEmoji('🎫').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('ticket_create_bug').setLabel('Signaler un Bug').setEmoji('🐛').setStyle(ButtonStyle.Danger)
-            );
+            const menu = new StringSelectMenuBuilder()
+                .setCustomId('ticket_select_menu')
+                .setPlaceholder('Choisis le motif de ton message...')
+                .addOptions([
+                    { label: 'Harcèlement / Cyberharcèlement', value: 'harcelement', emoji: '🚨', description: 'Insultes, menaces, acharnement...' },
+                    { label: 'Problème / Conflit entre membres', value: 'conflit', emoji: '⚠️', description: 'Tensions, disputes sur le serveur' },
+                    { label: 'Aide / Question générale', value: 'autre', emoji: '💬', description: 'Besoin d\'un renseignement ou de parler' }
+                ]);
 
+            const row = new ActionRowBuilder().addComponents(menu);
             await interaction.channel.send({ embeds: [embed], components: [row] });
-            return interaction.reply({ content: '✅ Panneau de tickets déployé avec succès !', ephemeral: true });
-        }
-
-        if (commandName === 'antiraid-ia') {
-            const etat = interaction.options.getBoolean('etat');
-            settings.antiRaidAI = etat;
-            return interaction.reply({ content: `✅ L'Anti-Raid IA est désormais ${etat ? '**activé** (surveillance active)' : '**désactivé**'}.`, ephemeral: true });
+            return interaction.reply({ content: '✅ Panel de tickets envoyé avec succès !', ephemeral: true });
         }
     }
 
-    // Gestion du menu déroulant de changement de langue dynamique
-    if (interaction.isStringSelectMenu() && interaction.customId === 'global_lang_select') {
-        settings.lang = interaction.values[0];
-        return interaction.update({ content: getT(interaction.guildId, 'langSet'), embeds: [], components: [] });
-    }
-
-    // Création dynamique d'un ticket modulaire
-    if (interaction.isButton() && interaction.customId.startsWith('ticket_create_')) {
+    // Gestion du menu déroulant (Sélection du motif)
+    if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select_menu') {
         await interaction.deferReply({ ephemeral: true });
-        const type = interaction.customId.split('_')[2];
+        const motif = interaction.values[0];
 
         try {
-            const channelName = `ticket-${type}-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
+            const channelName = `secours-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
             const ticketChannel = await interaction.guild.channels.create({
                 name: channelName,
                 type: ChannelType.GuildText,
@@ -233,54 +115,105 @@ client.on('interactionCreate', async interaction => {
                 ],
             });
 
-            const ticketEmbed = new EmbedBuilder()
-                .setTitle(`🎫 Ticket : ${type.toUpperCase()}`)
-                .setDescription(`Bonjour ${interaction.user}, un membre de l'équipe va vous prendre en charge.\nFermeture sécurisée disponible ci-dessous (réservée aux rôles autorisés).`)
-                .setColor('#3498DB');
+            // On enregistre l'état initial du ticket pour ce salon
+            ticketSteps.set(ticketChannel.id, { step: 'waiting_problem', userId: interaction.user.id });
 
-            const controlRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('ticket_close_secure').setLabel('Fermer le ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger)
+            const welcomeEmbed = new EmbedBuilder()
+                .setTitle('💬 Espace d\'écoute sécurisé')
+                .setDescription(`Bonjour ${interaction.user} ! 👋\nJ'ai bien reçu ta demande concernant : **${motif.toUpperCase()}**.\n\nPrends ton temps, dis-nous : **quel problème est-ce que tu rencontres ?**`)
+                .setColor('#5865F2');
+
+            const closeRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le salon').setEmoji('🔒').setStyle(ButtonStyle.Danger)
             );
 
-            await ticketChannel.send({ content: `${interaction.user}`, embeds: [ticketEmbed], components: [controlRow] });
-            return interaction.editReply({ content: `${getT(interaction.guildId, 'ticketCreated')} ${ticketChannel}` });
+            await ticketChannel.send({ content: `${interaction.user}`, embeds: [welcomeEmbed], components: [closeRow] });
+            return interaction.editReply({ content: `✅ Ton espace sécurisé a été créé : ${ticketChannel}` });
         } catch (e) {
-            return interaction.editReply({ content: '❌ Erreur lors de la création du salon de ticket.' });
+            return interaction.editReply({ content: `❌ Erreur lors de la création de l'espace.` });
         }
     }
 
-    // Fermeture contrôlée par rôles, génération de transcript et traçabilité
-    if (interaction.isButton() && interaction.customId === 'ticket_close_secure') {
-        // Vérification des permissions (Gérer le salon ou rôle Administrateur/Modérateur requis)
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-            return interaction.reply({ content: '❌ Vous n\'avez pas les rôles requis pour fermer ce ticket.', ephemeral: true });
-        }
-
-        await interaction.reply({ content: '🔒 Génération du transcript et fermeture imminente...', ephemeral: true });
+    // Bouton de fermeture de ticket
+    if (interaction.isButton() && interaction.customId === 'close_ticket') {
+        await interaction.reply({ content: '🔒 Fermeture de l\'espace et génération du transcript...', ephemeral: true });
 
         try {
-            // Récupération de l'historique des messages pour le transcript
             const messages = await interaction.channel.messages.fetch({ limit: 100 });
-            let transcript = `${getT(interaction.guildId, 'transcriptHeader')}\nSalon : ${interaction.channel.name}\nDate : ${new Date().toISOString()}\nFermé par : ${interaction.user.tag}\n\n`;
+            let transcript = `--- TRANSCRIPT / RAPPORT D'ÉCOUTE ---\nSalon : ${interaction.channel.name}\nDate : ${new Date().toLocaleString()}\n\n`;
             
             messages.reverse().forEach(m => {
-                transcript += `[${new Date(m.createdTimestamp).toLocaleString()}] ${m.author.tag}: ${m.content}\n`;
+                transcript += `[${new Date(m.createdTimestamp).toLocaleTimeString()}] ${m.author.tag}: ${m.content}\n`;
             });
 
             const buffer = Buffer.from(transcript, 'utf-8');
             const attachment = new AttachmentBuilder(buffer, { name: `transcript-${interaction.channel.name}.txt` });
 
-            // Envoi du transcript dans les logs ou le salon actuel avant suppression
-            await interaction.channel.send({ content: '📄 Voici le compte-rendu (transcript) de ce ticket :', files: [attachment] });
+            // Envoi du transcript en Message Privé à l'utilisateur qui ferme/ouvre le ticket si possible, ou dans le salon avant suppression
+            try {
+                const ownerId = ticketSteps.get(interaction.channel.id)?.userId;
+                if (ownerId) {
+                    const memberTarget = await interaction.guild.members.fetch(ownerId).catch(() => null);
+                    if (memberTarget) {
+                        await memberTarget.send({ content: '📄 Voici le compte-rendu de ton échange avec l\'équipe (transcript) :', files: [attachment] });
+                    }
+                }
+            } catch (err) {
+                // Si les MP sont fermés, on l'envoie directement dans le salon
+                await interaction.channel.send({ content: '📄 Compte-rendu de l\'échange :', files: [attachment] });
+            }
 
+            ticketSteps.delete(interaction.channel.id);
             setTimeout(async () => {
-                try { await interaction.channel.delete(); } catch (err) {}
-            }, 4000);
-        } catch (err) {
-            console.error('Erreur lors de la fermeture du ticket :', err);
+                try { await interaction.channel.delete(); } catch (e) {}
+            }, 3000);
+        } catch (e) {
+            console.error(e);
+        }
+    }
+});
+
+// Écouteur de messages dans les salons de tickets pour guider l'utilisateur
+client.on('messageCreate', async message => {
+    if (message.author.bot || !message.guild) return;
+
+    // Détection basique d'une salutation si quelqu'un écrit "bonjour", "salut", "hey", etc. dans un salon normal
+    const contentLower = message.content.toLowerCase();
+    if (contentLower.includes('bonjour') || contentLower.includes('salut') || contentLower.includes('hey') || contentLower.includes('coucou')) {
+        // Optionnel : tu peux laisser le bot répondre s'il est interpellé, mais concentrons-nous sur les tickets pour l'anti-harcèlement.
+    }
+
+    // Si on est dans un salon de ticket géré par le bot
+    if (ticketSteps.has(message.channel.id)) {
+        const state = ticketSteps.get(message.channel.id);
+        const config = serverConfigs.get(message.guild.id) || { staffRoleId: null };
+
+        if (state.step === 'waiting_problem') {
+            // Le membre vient d'expliquer son problème, le bot analyse/répond et demande les preuves
+            state.step = 'waiting_proofs';
+            
+            const replyEmbed = new EmbedBuilder()
+                .setTitle('🔍 Analyse & Suivi')
+                .setDescription('J\'ai bien pris note de ta situation. C\'est courageux de t'exprimer.\n\nPour que l\'équipe puisse agir efficacement, **peux-tu nous fournir des preuves** (captures d\'écran des messages, des profils concernés, des liens ou des détails supplémentaires) ?')
+                .setColor('#FFA500');
+
+            return message.reply({ embeds: [replyEmbed] });
+        }
+        else if (state.step === 'waiting_proofs') {
+            // Le membre a envoyé les preuves, le bot valide et contacte le staff en mentionnant le rôle configuré
+            state.step = 'staff_notified';
+
+            let staffMention = config.staffRoleId ? `<@&${config.staffRoleId}>` : '**[Rôle Staff non configuré - Utilisez /setstaffrole]**';
+
+            const finalEmbed = new EmbedBuilder()
+                .setTitle('🚨 Équipe prévenue')
+                .setDescription('Merci, j\'ai bien enregistré les éléments et les preuves transmises.\n\n**Je contacte l\'équipe staff immédiatement !** Un modérateur va arriver dans cet espace pour t'aider en toute sécurité.')
+                .setColor('#2ECC71');
+
+            await message.reply({ content: `${staffMention}`, embeds: [finalEmbed] });
         }
     }
 });
 
 client.login(process.env.TOKEN);
-    
+                                                                         
