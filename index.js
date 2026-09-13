@@ -184,10 +184,8 @@ app.get('/auth/discord/callback', async (req, res) => {
 
         const guilds = guildsResponse.data;
 
-        // Filtrer ou afficher les serveurs avec un beau design style Dashboard
         let guildsHtml = '';
         guilds.forEach(guild => {
-            // Vérification des permissions d'administrateur ou gestion de serveur (Bitwise 0x8 ou 0x20)
             const canManage = (guild.permissions & 0x20) === 0x20 || (guild.permissions & 0x8) === 0x8;
             if (canManage) {
                 guildsHtml += `
@@ -412,7 +410,7 @@ client.on('interactionCreate', async interaction => {
             const channelName = `ticket-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
             const ticketChannel = await interaction.guild.channels.create({
                 name: channelName,
-                    type: ChannelType.GuildText,
+                type: ChannelType.GuildText,
                 permissionOverwrites: [
                     { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
                     { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] },
@@ -429,4 +427,5 @@ client.on('interactionCreate', async interaction => {
                 new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger)
             );
 
-   
+            await ticketChannel.send({ content: `${interaction.user}`, embeds: [welcomeEmbed], components: [closeRow] });
+            return interaction.editReply({ content: `✅ Votre salon de 
