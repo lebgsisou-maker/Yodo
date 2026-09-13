@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, StringSelectMenuBuilder, PermissionFlagsBits, REST, Routes, ChannelType, PermissionsBitField, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, StringSelectMenuBuilder, PermissionFlagsBits, REST, Routes, ChannelType, PermissionsBitField } = require('discord.js');
 const express = require('express');
 const axios = require('axios');
 
@@ -10,7 +10,12 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || 'https://yodoprotect.onrender.com/auth/discord/callback';
 
+// Stockage global des configurations et des données XP par serveur
 const serverConfigs = new Map();
+const userXpData = new Map(); // Format: Map<guildId_userId, xp>
+
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 // --- PAGE D'ACCUEIL ---
 app.get('/', (req, res) => {
@@ -20,7 +25,7 @@ app.get('/', (req, res) => {
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Yodo Protect - Bot de Sécurité, Tickets & Modération</title>
+            <title>Yodo Protect - Bot de Sécurité, Tickets & Niveaux</title>
             <style>
                 body { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
                 header { background: #161b22; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
@@ -43,8 +48,8 @@ app.get('/', (req, res) => {
                 <div><a href="/auth/discord" class="btn btn-secondary" style="padding: 8px 16px;">Connexion Dashboard</a></div>
             </header>
             <div class="hero">
-                <h1>Protégez et gérez votre serveur Discord avec brio</h1>
-                <p class="subtitle">Yodo Protect est le bot ultime tout-en-un : Anti-Raid avancé, système de tickets intelligent, modération et bien plus encore !</p>
+                <h1>Le dashboard ultime pour votre serveur Discord</h1>
+                <p class="subtitle">Gérez vos tickets de support, l'anti-raid, les messages de bienvenue personnalisés et un système de niveaux complet en toute simplicité !</p>
                 <div class="btn-group">
                     <a href="https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&permissions=8&scope=bot%20applications.commands" class="btn btn-primary" target="_blank">Ajouter le Bot</a>
                     <a href="/auth/discord" class="btn btn-secondary">Accéder au Dashboard</a>
@@ -112,7 +117,7 @@ app.get('/auth/discord/callback', async (req, res) => {
                 <meta charset="UTF-8">
                 <title>Yodo Protect - Sélection du serveur</title>
                 <style>
-                    body { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; margin: 0; }
+                    body { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', sans-serif; padding: 40px; margin: 0; }
                     .container { max-width: 800px; margin: 0 auto; }
                     h1 { color: #fff; }
                 </style>
@@ -120,7 +125,7 @@ app.get('/auth/discord/callback', async (req, res) => {
             <body>
                 <div class="container">
                     <h1>Sélectionnez un serveur</h1>
-                    <p>Choisissez le serveur sur lequel vous souhaitez configurer Yodo Protect.</p>
+                    <p>Choisissez le serveur sur lequel vous souhaitez configurer les modules Yodo Protect.</p>
                     <div style="margin-top: 30px;">${guildsHtml || '<p>Aucun serveur administrable trouvé.</p>'}</div>
                     <br><a href="/" style="color: #5865F2; text-decoration: none;">← Retour à l'accueil</a>
                 </div>
@@ -133,11 +138,21 @@ app.get('/auth/discord/callback', async (req, res) => {
     }
 });
 
-// --- PAGE DE CONFIGURATION D'UN SERVEUR ---
+// --- PAGE DE CONFIGURATION DÉTAILLÉE D'UN SERVEUR ---
 app.get('/dashboard/configure/:guildId', (req, res) => {
     const guildId = req.params.guildId;
     const guildName = req.query.name || 'Serveur Discord';
-    let config = serverConfigs.get(guildId) || { antiRaid: false, niveaux: false };
+    
+    // Configuration par défaut ou existante
+    let config = serverConfigs.get(guildId) || {
+        antiRaid: false,
+        welcomeMsg: 'Bienvenue {user} sur {server} ! Amuse-toi bien !',
+        welcomeChannel: '',
+        welcomeBg: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f',
+        ticketChannel: '',
+        ticketRole: '',
+        levelsEnabled: true
+    };
 
     res.send(`
         <!DOCTYPE html>
@@ -146,55 +161,99 @@ app.get('/dashboard/configure/:guildId', (req, res) => {
             <meta charset="UTF-8">
             <title>Configuration - ${guildName}</title>
             <style>
-                body { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', sans-serif; padding: 40px; margin: 0; }
-                .container { max-width: 600px; margin: 0 auto; background: #161b22; padding: 30px; border-radius: 10px; border: 1px solid #30363d; }
+                body { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', sans-serif; padding: 30px; margin: 0; }
+                .container { max-width: 750px; margin: 0 auto; background: #161b22; padding: 30px; border-radius: 10px; border: 1px solid #30363d; }
                 h1 { color: #fff; margin-top: 0; }
-                .option { margin: 20px 0; padding: 15px; background: #21262d; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }
-                .btn { background: #5865F2; color: white; padding: 10px 20px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; text-decoration: none; }
-                .btn-success { background: #238636; }
+                .section { margin: 25px 0; padding: 20px; background: #21262d; border-radius: 8px; border: 1px solid #30363d; }
+                h3 { margin-top: 0; color: #5865F2; }
+                label { display: block; margin: 10px 0 5px; font-weight: 600; font-size: 14px; }
+                input[type="text"], input[type="url"], textarea { width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: #fff; border-radius: 6px; box-sizing: border-box; }
+                textarea { resize: vertical; height: 80px; }
+                .checkbox-row { display: flex; align-items: center; justify-content: space-between; }
+                .btn { background: #238636; color: white; padding: 12px 25px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; text-decoration: none; font-size: 16px; }
+                .btn:hover { background: #2ea043; }
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>⚙️ Configuration : ${guildName}</h1>
-                <p>Gérez les options de sécurité de votre serveur en temps réel.</p>
+                <h1>⚙️ Dashboard : ${guildName}</h1>
+                <p>Personnalisez chaque module de Yodo Protect pour votre communauté.</p>
+                
                 <form action="/dashboard/save/${guildId}" method="POST">
-                    <div class="option">
-                        <span>🛡️ Anti-Raid / Protection Comptes Louches</span>
-                        <input type="checkbox" name="antiRaid" ${config.antiRaid ? 'checked' : ''} style="transform: scale(1.5);">
+                    
+                    <!-- SÉCURITÉ / ANTI-RAID -->
+                    <div class="section">
+                        <h3>🛡️ Sécurité & Anti-Raid</h3>
+                        <div class="checkbox-row">
+                            <span>Activer la protection anti-comptes louches / bots</span>
+                            <input type="checkbox" name="antiRaid" ${config.antiRaid ? 'checked' : ''} style="transform: scale(1.4);">
+                        </div>
                     </div>
-                    <div class="option">
-                        <span>⭐ Système de Niveaux & XP</span>
-                        <input type="checkbox" name="niveaux" ${config.niveaux ? 'checked' : ''} style="transform: scale(1.5);">
+
+                    <!-- BIENVENUE & AU-REVOIR -->
+                    <div class="section">
+                        <h3>👋 Messages de Bienvenue & Au-revoir</h3>
+                        <label>Nom ou ID du salon textuel pour les annonces :</label>
+                        <input type="text" name="welcomeChannel" value="${config.welcomeChannel}" placeholder="ex: general ou bienvenue">
+                        
+                        <label>Message personnalisé (utilisez {user} et {server}) :</label>
+                        <textarea name="welcomeMsg">${config.welcomeMsg}</textarea>
+                        
+                        <label>Lien de l'image de fond (Bannière) :</label>
+                        <input type="url" name="welcomeBg" value="${config.welcomeBg}">
                     </div>
+
+                    <!-- TICKETS DE SUPPORT -->
+                    <div class="section">
+                        <h3>🎫 Système de Tickets</h3>
+                        <label>Nom du salon où envoyer le panel de tickets :</label>
+                        <input type="text" name="ticketChannel" value="${config.ticketChannel}" placeholder="ex: support ou tickets">
+                        
+                        <label>ID ou Nom du rôle Staff / Support (qui pourra voir les tickets) :</label>
+                        <input type="text" name="ticketRole" value="${config.ticketRole}" placeholder="ex: @Modérateur ou ID du rôle">
+                    </div>
+
+                    <!-- SYSTÈME DE NIVEAUX -->
+                    <div class="section">
+                        <h3>⭐ Système de Niveaux & XP</h3>
+                        <div class="checkbox-row">
+                            <span>Activer le gain d'XP par message & classement /rank</span>
+                            <input type="checkbox" name="levelsEnabled" ${config.levelsEnabled ? 'checked' : ''} style="transform: scale(1.4);">
+                        </div>
+                    </div>
+
                     <br>
-                    <button type="submit" class="btn btn-success">Enregistrer les modifications</button>
+                    <button type="submit" class="btn">💾 Enregistrer toutes les modifications</button>
                 </form>
-                <br>
-                <a href="/auth/discord" style="color: #5865F2; text-decoration: none;">← Retour à la liste des serveurs</a>
+                <br><br>
+                <a href="/auth/discord" style="color: #5865F2; text-decoration: none;">← Retourner à la liste de mes serveurs</a>
             </div>
         </body>
         </html>
     `);
 });
 
-// Permet de lire les données POST du formulaire
-app.use(express.urlencoded({ extended: true }));
-
+// Traitement de la sauvegarde du formulaire dashboard
 app.post('/dashboard/save/:guildId', (req, res) => {
     const guildId = req.params.guildId;
-    const antiRaid = req.body.antiRaid === 'on';
-    const niveaux = req.body.niveaux === 'on';
-
-    serverConfigs.set(guildId, { antiRaid, niveaux });
+    
+    serverConfigs.set(guildId, {
+        antiRaid: req.body.antiRaid === 'on',
+        welcomeMsg: req.body.welcomeMsg,
+        welcomeChannel: req.body.welcomeChannel,
+        welcomeBg: req.body.welcomeBg,
+        ticketChannel: req.body.ticketChannel,
+        ticketRole: req.body.ticketRole,
+        levelsEnabled: req.body.levelsEnabled === 'on'
+    });
 
     res.send(`
         <!DOCTYPE html>
         <html lang="fr">
         <head><meta charset="UTF-8"><title>Sauvegardé</title></head>
         <body style="background: #0d1117; color: #fff; font-family: sans-serif; text-align: center; padding-top: 100px;">
-            <h1>✅ Configuration enregistrée avec succès !</h1>
-            <p>Vos modifications ont bien été prises en compte par Yodo Protect.</p>
+            <h1>✅ Paramètres mis à jour avec succès !</h1>
+            <p>Le bot prend en compte vos nouveaux réglages en temps réel.</p>
             <br><a href="/auth/discord" style="color: #5865F2; text-decoration: none; font-size: 18px;">← Retourner à mes serveurs</a>
         </body>
         </html>
@@ -202,11 +261,11 @@ app.post('/dashboard/save/:guildId', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`[WEB] Dashboard / Serveur Express lancé sur le port ${PORT}`);
+    console.log(`[WEB] Dashboard & Serveur Express actif sur le port ${PORT}`);
 });
 
 
-// --- CONFIGURATION DISCORD BOT ---
+// --- CONFIGURATION DU BOT DISCORD ---
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -223,8 +282,12 @@ client.once('ready', async () => {
     const commands = [
         new SlashCommandBuilder()
             .setName('ticketpanel')
-            .setDescription('Envoyer le panel de tickets')
+            .setDescription('Envoyer le panel de tickets configuré')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+            .toJSON(),
+        new SlashCommandBuilder()
+            .setName('rank')
+            .setDescription('Afficher votre niveau et votre XP actuelle')
             .toJSON(),
         new SlashCommandBuilder()
             .setName('help')
@@ -235,104 +298,116 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('[COMMANDES] Enregistrées avec succès !');
+        console.log('[COMMANDES] Slash commands enregistrées !');
     } catch (error) {
         console.error('[ERREUR COMMANDES]', error);
     }
 });
 
-// --- GESTION DE LA SÉCURITÉ (Anti-Raid) ---
+// --- MODULE BIENVENUE & XP (Messages) ---
 client.on('guildMemberAdd', async member => {
-    let config = serverConfigs.get(member.guild.id) || { antiRaid: false, niveaux: false };
+    let config = serverConfigs.get(member.guild.id);
     
+    // 1. Anti-Raid Vérification
     const accountAgeDays = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
-    if (config.antiRaid && (accountAgeDays < 3 || member.user.bot)) {
+    if (config && config.antiRaid && (accountAgeDays < 3 || member.user.bot)) {
         let urgenceChannel = member.guild.channels.cache.find(c => c.name === 'yodoprotect-urgence');
-        
         if (!urgenceChannel) {
             try {
                 urgenceChannel = await member.guild.channels.create({
                     name: 'yodoprotect-urgence',
                     type: ChannelType.GuildText,
-                    permissionOverwrites: [
-                        { id: member.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                        { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
-                    ]
+                    permissionOverwrites: [{ id: member.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] }]
                 });
             } catch (e) {}
         }
-
         if (urgenceChannel) {
             const alertEmbed = new EmbedBuilder()
-                .setTitle('🚨 Alerte Sécurité - Compte Suspect Détecté')
-                .setDescription(`Un compte potentiellement dangereux ou un bot vient de rejoindre !\n\n👤 **Membre :** ${member.user.tag} (${member.id})\n📅 **Création :** Il y a ${Math.floor(accountAgeDays)} jours`)
+                .setTitle('🚨 Alerte Sécurité - Compte Suspect')
+                .setDescription(`Membre : ${member.user.tag} (${member.id})\nCréé il y a ${Math.floor(accountAgeDays)} jours.`)
                 .setColor('#E74C3C');
-            await urgenceChannel.send({ content: `<@${member.guild.ownerId}>`, embeds: [alertEmbed] }).catch(() => {});
+            await urgenceChannel.send({ embeds: [alertEmbed] }).catch(() => {});
+        }
+    }
+
+    // 2. Message de Bienvenue Personnalisé
+    if (config && config.welcomeChannel) {
+        const targetChan = member.guild.channels.cache.find(c => c.name === config.welcomeChannel || c.id === config.welcomeChannel);
+        if (targetChan) {
+            let customText = config.welcomeMsg
+                .replace('{user}', `<@${member.id}>`)
+                .replace('{server}', member.guild.name);
+
+            const welcomeEmbed = new EmbedBuilder()
+                .setTitle('✨ Nouveau Membre !')
+                .setDescription(customText)
+                .setImage(config.welcomeBg)
+                .setColor('#5865F2');
+            
+            await targetChan.send({ embeds: [welcomeEmbed] }).catch(() => {});
         }
     }
 });
 
-// --- INTERACTIONS (Tickets) ---
+// --- MODULE SYSTÈME DE NIVEAUX & XP ---
+client.on('messageCreate', async message => {
+    if (message.author.bot || !message.guild) return;
+
+    let config = serverConfigs.get(message.guild.id);
+    if (config && config.levelsEnabled === false) return;
+
+    const key = `${message.guild.id}_${message.author.id}`;
+    let currentXp = userXpData.get(key) || 0;
+    
+    // Ajout aléatoire entre 15 et 25 XP par message
+    const earnedXp = Math.floor(Math.random() * 11) + 15;
+    currentXp += earnedXp;
+    userXpData.set(key, currentXp);
+});
+
+// --- INTERACTIONS (Commandes & Tickets) ---
 client.on('interactionCreate', async interaction => {
     if (interaction.isChatInputCommand()) {
         const { commandName } = interaction;
+        
         if (commandName === 'help') {
             const embed = new EmbedBuilder()
                 .setTitle('🛡️ Yodo Protect - Centre d\'Aide')
-                .setDescription('Bot de protection et de gestion de tickets.')
+                .setDescription('Commandes disponibles :\n• `/ticketpanel` : Déploie le panneau de support\n• `/rank` : Affiche votre progression XP')
                 .setColor('#5865F2');
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
+
+        if (commandName === 'rank') {
+            const key = `${interaction.guild.id}_${interaction.user.id}`;
+            const xp = userXpData.get(key) || 0;
+            const level = Math.floor(0.1 * Math.sqrt(xp)) + 1;
+
+            const embed = new EmbedBuilder()
+                .setTitle(`⭐ Niveau de ${interaction.user.username}`)
+                .setDescription(`• **Niveau :** ${level}\n• **XP Totale :** ${xp} points`)
+                .setColor('#F1C40F');
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
         if (commandName === 'ticketpanel') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-                return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
+                return interaction.reply({ content: '❌ Vous devez gérer le serveur pour utiliser cette commande.', ephemeral: true });
             }
+
+            let config = serverConfigs.get(interaction.guild.id);
             const embed = new EmbedBuilder()
-                .setTitle('🛡️ Espace de Support - Yodo Protect')
-                .setDescription('Sélectionne une option pour ouvrir un salon de ticket privé.')
-                .setColor('#FF6B6B');
+                .setTitle('🛡️ Support & Tickets - Yodo Protect')
+                .setDescription('Sélectionnez un motif dans le menu déroulant ci-dessous pour ouvrir un salon de discussion privé avec l\'équipe.')
+                .setColor('#5865F2');
+
             const menu = new StringSelectMenuBuilder()
                 .setCustomId('ticket_select_menu')
-                .setPlaceholder('Choisis le motif...')
+                .setPlaceholder('Choisissez un motif de contact...')
                 .addOptions([
                     { label: 'Problème / Conflit', value: 'conflit', emoji: '⚠️' },
-                    { label: 'Aide générale', value: 'aide', emoji: '💬' },
-                    { label: 'Autre', value: 'autre', emoji: '📌' }
+                    { label: 'Aide générale / Question', value: 'aide', emoji: '💬' },
+                    { label: 'Autre demande', value: 'autre', emoji: '📌' }
                 ]);
-            const row = new ActionRowBuilder().addComponents(menu);
-            await interaction.channel.send({ embeds: [embed], components: [row] });
-            return interaction.reply({ content: '✅ Panel de tickets envoyé !', ephemeral: true });
-        }
-    }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select_menu') {
-        await interaction.deferReply({ ephemeral: true });
-        const motif = interaction.values[0];
-        try {
-            const channelName = `ticket-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
-            const ticketChannel = await interaction.guild.channels.create({
-                name: channelName,
-                type: ChannelType.GuildText,
-                permissionOverwrites: [
-                    { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-                    { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] },
-                    { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageChannels] }
-                ],
-            });
-            const welcomeEmbed = new EmbedBuilder()
-                .setTitle('🎫 Ticket Ouvert')
-                .setDescription(`Bonjour ${interaction.user} !\nVotre demande (**${motif.toUpperCase()}**) a été prise en compte.`)
-                .setColor('#5865F2');
-            const closeRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer').setEmoji('🔒').ButtonStyle = ButtonStyle.Danger
-            );
-            await ticketChannel.send({ content: `${interaction.user}`, embeds: [welcomeEmbed], components: [closeRow] });
-            return interaction.editReply({ content: `✅ Salon créé : ${ticketChannel}` });
-        } catch (e) {
-            return interaction.editReply({ content: `❌ Erreur lors de la création.` });
-        }
-    }
-});
-
-client.login(process.env.TOKEN);
-                
+            const row = new ActionRowBuilder().addComponent
