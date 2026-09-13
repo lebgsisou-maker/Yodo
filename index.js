@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:3000/auth/discord/callback';
+const REDIRECT_URI = process.env.REDIRECT_URI || 'https://yodoprotect.onrender.com/auth/discord/callback';
 
 // --- PAGE D'ACCUEIL / VITRINE DU BOT ---
 app.get('/', (req, res) => {
