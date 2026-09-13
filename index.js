@@ -6,16 +6,160 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Utilisation des variables d'environnement configurées sur Render
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:3000/auth/discord/callback';
+
+// --- PAGE D'ACCUEIL / VITRINE DU BOT ---
+app.get('/', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="fr">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Yodo Protect - Bot de Sécurité, Tickets & Modération</title>
+            <style>
+                body {
+                    background-color: #0d1117;
+                    color: #c9d1d9;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                }
+                header {
+                    background: #161b22;
+                    padding: 20px 40px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    border-bottom: 1px solid #30363d;
+                }
+                .logo {
+                    font-size: 22px;
+                    font-weight: bold;
+                    color: #5865F2;
+                }
+                .hero {
+                    text-align: center;
+                    padding: 80px 20px;
+                    max-width: 800px;
+                    margin: 0 auto;
+                }
+                h1 {
+                    font-size: 48px;
+                    color: #ffffff;
+                    margin-bottom: 20px;
+                }
+                p.subtitle {
+                    font-size: 18px;
+                    color: #8b949e;
+                    margin-bottom: 40px;
+                    line-height: 1.6;
+                }
+                .btn-group {
+                    display: flex;
+                    gap: 15px;
+                    justify-content: center;
+                    margin-bottom: 60px;
+                }
+                .btn {
+                    padding: 14px 28px;
+                    border-radius: 8px;
+                    font-weight: bold;
+                    text-decoration: none;
+                    transition: transform 0.2s, background 0.2s;
+                }
+                .btn-primary {
+                    background-color: #5865F2;
+                    color: white;
+                }
+                .btn-primary:hover {
+                    background-color: #4752C4;
+                }
+                .btn-secondary {
+                    background-color: #21262d;
+                    color: #c9d1d9;
+                    border: 1px solid #30363d;
+                }
+                .btn-secondary:hover {
+                    background-color: #30363d;
+                }
+                .features {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                    gap: 20px;
+                    padding: 0 40px 80px 40px;
+                    max-width: 1000px;
+                    margin: 0 auto;
+                }
+                .card {
+                    background-color: #161b22;
+                    border: 1px solid #30363d;
+                    padding: 25px;
+                    border-radius: 10px;
+                }
+                .card h3 {
+                    color: #5865F2;
+                    margin-top: 0;
+                }
+                footer {
+                    text-align: center;
+                    padding: 30px;
+                    background: #161b22;
+                    color: #8b949e;
+                    border-top: 1px solid #30363d;
+                    font-size: 14px;
+                }
+            </style>
+        </head>
+        <body>
+            <header>
+                <div class="logo">🛡️ Yodo Protect</div>
+                <div>
+                    <a href="/auth/discord" class="btn btn-secondary" style="padding: 8px 16px;">Connexion Dashboard</a>
+                </div>
+            </header>
+
+            <div class="hero">
+                <h1>Protégez et gérez votre serveur Discord avec brio</h1>
+                <p class="subtitle">Yodo Protect est le bot ultime tout-en-un : Anti-Raid et Anti-Nuke avancé, système de tickets intelligent avec relance automatique, niveaux personnalisés, modération stricte et bien plus encore !</p>
+                
+                <div class="btn-group">
+                    <a href="https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&permissions=8&scope=bot%20applications.commands" class="btn btn-primary" target="_blank">Ajouter le Bot</a>
+                    <a href="/auth/discord" class="btn btn-secondary">Accéder au Dashboard</a>
+                </div>
+            </div>
+
+            <div class="features">
+                <div class="card">
+                    <h3>🛡️ Anti-Raid & Anti-Nuke</h3>
+                    <p>Protection multi-niveaux pour intercepter les bots, les raids massifs et contrer instantanément toute tentative de nuke.</p>
+                </div>
+                <div class="card">
+                    <h3>🎫 Système de Tickets Pro</h3>
+                    <p>Salons sécurisés, transcripts automatiques, rôles staff configurables et assistant de relance si le staff met du temps à répondre.</p>
+                </div>
+                <div class="card">
+                    <h3>⭐ Niveaux & Bienvenue</h3>
+                    <p>Messages de bienvenue/au revoir ultra-personnalisables et système d'XP avec bannières de rang.</p>
+                </div>
+            </div>
+
+            <footer>
+                <p>&copy; 2026 Yodo Protect. Tous droits réservés. | Conditions d'utilisation (ToS)</p>
+            </footer>
+        </body>
+        </html>
+    `);
+});
 
 app.get('/auth/discord', (req, res) => {
     const discordLoginUrl = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
     res.redirect(discordLoginUrl);
 });
 
+// --- PAGE DE GESTION DES SERVEURS (DASHBOARD) ---
 app.get('/auth/discord/callback', async (req, res) => {
     const code = req.query.code;
     if (!code) return res.send('Aucun code reçu de Discord.');
@@ -38,7 +182,72 @@ app.get('/auth/discord/callback', async (req, res) => {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
 
-        res.json(guildsResponse.data);
+        const guilds = guildsResponse.data;
+
+        // Filtrer ou afficher les serveurs avec un beau design style Dashboard
+        let guildsHtml = '';
+        guilds.forEach(guild => {
+            // Vérification des permissions d'administrateur ou gestion de serveur (Bitwise 0x8 ou 0x20)
+            const canManage = (guild.permissions & 0x20) === 0x20 || (guild.permissions & 0x8) === 0x8;
+            if (canManage) {
+                guildsHtml += `
+                    <div style="background: #161b22; border: 1px solid #30363d; padding: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <div style="font-size: 24px; font-weight: bold; color: #5865F2; background: #21262d; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; border-radius: 50%;">⚙️</div>
+                            <div>
+                                <h3 style="margin: 0; color: #fff; font-size: 18px;">${guild.name}</h3>
+                                <p style="margin: 5px 0 0 0; color: #8b949e; font-size: 13px;">ID: ${guild.id}</p>
+                            </div>
+                        </div>
+                        <a href="#" style="background: #238636; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px;">Configurer</a>
+                    </div>
+                `;
+            }
+        });
+
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="fr">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Yodo Protect - Sélection du serveur</title>
+                <style>
+                    body { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 40px; margin: 0; }
+                    .container { max-width: 800px; margin: 0 auto; }
+                    h1 { color: #fff; font-size: 28px; }
+                    p { color: #8b949e; }
+                    .stats { display: flex; gap: 20px; margin: 30px 0; }
+                    .stat-card { background: #161b22; border: 1px solid #30363d; padding: 20px; border-radius: 10px; flex: 1; text-align: center; }
+                    .stat-number { font-size: 32px; font-weight: bold; color: #5865F2; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Sélectionnez un serveur</h1>
+                    <p>Choisissez le serveur sur lequel vous souhaitez configurer Yodo Protect.</p>
+                    
+                    <div class="stats">
+                        <div class="stat-card">
+                            <div class="stat-number">${guilds.length}</div>
+                            <div>Serveurs totaux</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">⚡ Actif</div>
+                            <div>Statut du Dashboard</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 30px;">
+                        ${guildsHtml || '<p>Aucun serveur administrable trouvé.</p>'}
+                    </div>
+                    <br>
+                    <a href="/" style="color: #5865F2; text-decoration: none;">← Retour à l'accueil</a>
+                </div>
+            </body>
+            </html>
+        `);
+
     } catch (error) {
         console.error(error);
         res.send('Erreur lors de la connexion avec Discord.');
@@ -62,7 +271,6 @@ const client = new Client({
 });
 
 const serverConfigs = new Map();
-const ticketSteps = new Map();
 
 client.once('ready', async () => {
     console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt.`);
@@ -204,7 +412,7 @@ client.on('interactionCreate', async interaction => {
             const channelName = `ticket-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
             const ticketChannel = await interaction.guild.channels.create({
                 name: channelName,
-                type: ChannelType.GuildText,
+                    type: ChannelType.GuildText,
                 permissionOverwrites: [
                     { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
                     { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] },
@@ -221,31 +429,4 @@ client.on('interactionCreate', async interaction => {
                 new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger)
             );
 
-            await ticketChannel.send({ content: `${interaction.user}`, embeds: [welcomeEmbed], components: [closeRow] });
-            return interaction.editReply({ content: `✅ Votre salon de ticket a été créé : ${ticketChannel}` });
-        } catch (e) {
-            return interaction.editReply({ content: `❌ Erreur lors de la création du ticket.` });
-        }
-    }
-
-    if (interaction.isButton() && interaction.customId === 'close_ticket') {
-        await interaction.reply({ content: '🔒 Fermeture du ticket en cours...', ephemeral: true });
-
-        try {
-            const messages = await interaction.channel.messages.fetch({ limit: 100 });
-            let transcript = `--- TRANSCRIPT DE TICKET ---\nSalon : ${interaction.channel.name}\nDate : ${new Date().toLocaleString()}\n\n`;
-            messages.reverse().forEach(m => {
-                transcript += `[${new Date(m.createdTimestamp).toLocaleTimeString()}] ${m.author.tag}: ${m.content}\n`;
-            });
-
-            setTimeout(async () => {
-                try { await interaction.channel.delete(); } catch (e) {}
-            }, 3000);
-        } catch (e) {
-            console.error(e);
-        }
-    }
-});
-
-client.login(process.env.TOKEN);
-        
+   
