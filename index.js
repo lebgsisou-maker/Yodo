@@ -428,6 +428,29 @@ client.on('interactionCreate', async interaction => {
             );
 
             await ticketChannel.send({ content: `${interaction.user}`, embeds: [welcomeEmbed], components: [closeRow] });
-            return interaction.editReply({ content: `✅ Votre salon de 
+            return interaction.editReply({ content: `✅ Votre salon de ticket a été créé : ${ticketChannel}` });
+        } catch (e) {
+            return interaction.editReply({ content: `❌ Erreur lors de la création du ticket.` });
+        }
+    }
+
+    if (interaction.isButton() && interaction.customId === 'close_ticket') {
+        await interaction.reply({ content: '🔒 Fermeture du ticket en cours...', ephemeral: true });
+
+        try {
+            const messages = await interaction.channel.messages.fetch({ limit: 100 });
+            let transcript = `--- TRANSCRIPT DE TICKET ---\nSalon : ${interaction.channel.name}\nDate : ${new Date().toLocaleString()}\n\n`;
+            messages.reverse().forEach(m => {
+                transcript += `[${new Date(m.createdTimestamp).toLocaleTimeString()}] ${m.author.tag}: ${m.content}\n`;
+            });
+
+            setTimeout(async () => {
+                try { await interaction.channel.delete(); } catch (e) {}
+            }, 3000);
+        } catch (e) {
+            console.error(e);
+        }
+    }
+});
 
 client.login(process.env.TOKEN);
