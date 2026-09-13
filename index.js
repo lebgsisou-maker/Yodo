@@ -429,3 +429,5 @@ client.on('interactionCreate', async interaction => {
 
             await ticketChannel.send({ content: `${interaction.user}`, embeds: [welcomeEmbed], components: [closeRow] });
             return interaction.editReply({ content: `✅ Votre salon de 
+
+client.login(process.env.TOKEN);
