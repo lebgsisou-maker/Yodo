@@ -1,5 +1,56 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder, StringSelectMenuBuilder, PermissionFlagsBits, REST, Routes, ChannelType, PermissionsBitField, AttachmentBuilder } = require('discord.js');
+const express = require('express');
+const axios = require('axios');
 
+// --- CONFIGURATION EXPRESS & OAUTH2 ---
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Utilisation des variables d'environnement configurées sur Render
+const CLIENT_ID = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:3000/auth/discord/callback';
+
+app.get('/auth/discord', (req, res) => {
+    const discordLoginUrl = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=identify%20guilds`;
+    res.redirect(discordLoginUrl);
+});
+
+app.get('/auth/discord/callback', async (req, res) => {
+    const code = req.query.code;
+    if (!code) return res.send('Aucun code reçu de Discord.');
+
+    try {
+        const params = new URLSearchParams({
+            client_id: CLIENT_ID,
+            client_secret: CLIENT_SECRET,
+            grant_type: 'authorization_code',
+            code: code,
+            redirect_uri: REDIRECT_URI,
+        });
+
+        const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', params, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        });
+
+        const accessToken = tokenResponse.data.access_token;
+        const guildsResponse = await axios.get('https://discord.com/api/users/@me/guilds', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        res.json(guildsResponse.data);
+    } catch (error) {
+        console.error(error);
+        res.send('Erreur lors de la connexion avec Discord.');
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`[WEB] Dashboard / Serveur Express lancé sur le port ${PORT}`);
+});
+
+
+// --- CONFIGURATION DISCORD BOT ---
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -14,18 +65,20 @@ const serverConfigs = new Map();
 const ticketSteps = new Map();
 
 client.once('ready', async () => {
-    console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt avec Groq.`);
+    console.log(`[YODO PROTECT] Connecté en tant que ${client.user.tag} ! Prêt.`);
 
     const commands = [
         new SlashCommandBuilder()
             .setName('ticketpanel')
-            .setDescription('Envoyer le panel de tickets de signalement / aide')
+            .setDescription('Envoyer le panel de tickets')
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
-            .setName('setstaffrole')
-            .setDescription('Définir le rôle du staff à mentionner lors d\'un signalement')
-            .addRoleOption(option => option.setName('role').setDescription('Le rôle du staff').setRequired(true))
+            .setName('setconfig')
+            .setDescription('Configurer les modules du serveur (Anti-raid, Niveaux, Bienvenue, etc.)')
+            .addBooleanOption(option => option.setName('antiraid').setDescription('Activer l\'anti-raid / détection de bots bizarres').setRequired(false))
+            .addBooleanOption(option => option.setName('niveaux').setDescription('Activer le système de niveaux').setRequired(false))
+            .addChannelOption(option => option.setName('bienvenue_salon').setDescription('Salon pour les messages de bienvenue').setRequired(false))
             .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
             .toJSON(),
         new SlashCommandBuilder()
@@ -43,8 +96,47 @@ client.once('ready', async () => {
     }
 });
 
+// --- GESTION DE LA SÉCURITÉ (Anti-Raid / Comptes louches) ---
+client.on('guildMemberAdd', async member => {
+    let config = serverConfigs.get(member.guild.id) || { antiRaid: false, niveaux: false, bienvenueSalon: null };
+    
+    const accountAgeDays = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
+    if (config.antiRaid && (accountAgeDays < 3 || member.user.bot)) {
+        let urgenceChannel = member.guild.channels.cache.find(c => c.name === 'yodoprotect-urgence');
+        
+        if (!urgenceChannel) {
+            try {
+                urgenceChannel = await member.guild.channels.create({
+                    name: 'yodoprotect-urgence',
+                    type: ChannelType.GuildText,
+                    permissionOverwrites: [
+                        { id: member.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                        { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+                    ]
+                });
+            } catch (e) { console.error('Impossible de créer le salon d urgence'); }
+        }
+
+        if (urgenceChannel) {
+            const alertEmbed = new EmbedBuilder()
+                .setTitle('🚨 Alerte Sécurité - Compte Suspect Détecté')
+                .setDescription(`Un compte potentiellement dangereux ou un bot vient de rejoindre !\n\n👤 **Membre :** ${member.user.tag} (${member.id})\n📅 **Création du compte :** Il y a ${Math.floor(accountAgeDays)} jours`)
+                .setColor('#E74C3C');
+            await urgenceChannel.send({ content: `<@${member.guild.ownerId}>`, embeds: [alertEmbed] }).catch(() => {});
+        }
+    }
+
+    if (config.bienvenueSalon) {
+        const welcomeChannel = member.guild.channels.cache.get(config.bienvenueSalon);
+        if (welcomeChannel) {
+            welcomeChannel.send(`Bienvenue sur le serveur, ${member} ! 🎉 Amuse-toi bien ici.`);
+        }
+    }
+});
+
+// --- INTERACTIONS ---
 client.on('interactionCreate', async interaction => {
-    let config = serverConfigs.get(interaction.guildId) || { staffRoleId: null };
+    let config = serverConfigs.get(interaction.guildId) || { antiRaid: false, niveaux: false, bienvenueSalon: null };
     serverConfigs.set(interaction.guildId, config);
 
     if (interaction.isChatInputCommand()) {
@@ -53,18 +145,30 @@ client.on('interactionCreate', async interaction => {
         if (commandName === 'help') {
             const embed = new EmbedBuilder()
                 .setTitle('🛡️ Yodo Protect - Centre d\'Aide')
-                .setDescription('Je suis un bot intelligent dédié à la protection et à l\'écoute.')
+                .setDescription('Bot de protection, de modération et de gestion de tickets.')
                 .setColor('#5865F2');
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
 
-        if (commandName === 'setstaffrole') {
+        if (commandName === 'setconfig') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 return interaction.reply({ content: '❌ Permission requise.', ephemeral: true });
             }
-            const role = interaction.options.getRole('role');
-            config.staffRoleId = role.id;
-            return interaction.reply({ content: `✅ Le rôle staff a été défini sur **${role.name}** !`, ephemeral: true });
+
+            const antiRaidOpt = interaction.options.getBoolean('antiraid');
+            const niveauxOpt = interaction.options.getBoolean('niveaux');
+            const bienvenueOpt = interaction.options.getChannel('bienvenue_salon');
+
+            if (antiRaidOpt !== null) config.antiRaid = antiRaidOpt;
+            if (niveauxOpt !== null) config.niveaux = niveauxOpt;
+            if (bienvenueOpt !== null) config.bienvenueSalon = bienvenueOpt.id;
+
+            const confEmbed = new EmbedBuilder()
+                .setTitle('⚙️ Configuration mise à jour')
+                .setDescription(`🛡️ **Anti-Raid / Détection :** ${config.antiRaid ? 'Activé ✅' : 'Désactivé ❌'}\n⭐ **Système de Niveaux :** ${config.niveaux ? 'Activé ✅' : 'Désactivé ❌'}\n👋 **Salon Bienvenue :** ${config.bienvenueSalon ? `<#${config.bienvenueSalon}>` : 'Non défini'}`)
+                .setColor('#2ECC71');
+
+            return interaction.reply({ embeds: [confEmbed], ephemeral: true });
         }
 
         if (commandName === 'ticketpanel') {
@@ -73,22 +177,22 @@ client.on('interactionCreate', async interaction => {
             }
 
             const embed = new EmbedBuilder()
-                .setTitle('🛡️ Espace d\'écoute & Signalement - Yodo Protect')
-                .setDescription('Victime ou témoin de harcèlement ou d\'un problème ?\n\n*Sélectionne une option pour ouvrir un espace sécurisé avec notre assistant virtuel et l\'équipe.*')
+                .setTitle('🛡️ Espace de Support - Yodo Protect')
+                .setDescription('Besoin d\'aide ou envie de contacter le staff ?\n\n*Sélectionne une option dans le menu ci-dessous pour ouvrir un salon privé.*')
                 .setColor('#FF6B6B');
 
             const menu = new StringSelectMenuBuilder()
                 .setCustomId('ticket_select_menu')
-                .setPlaceholder('Choisis le motif...')
+                .setPlaceholder('Choisis le motif du ticket...')
                 .addOptions([
-                    { label: 'Harcèlement / Cyberharcèlement', value: 'harcelement', emoji: '🚨', description: 'Insultes, menaces, acharnement...' },
-                    { label: 'Problème / Conflit entre membres', value: 'conflit', emoji: '⚠️', description: 'Tensions, disputes sur le serveur' },
-                    { label: 'Aide / Question générale', value: 'autre', emoji: '💬', description: 'Besoin d\'un renseignement' }
+                    { label: 'Problème / Conflit', value: 'conflit', emoji: '⚠️', description: 'Tensions ou litige sur le serveur' },
+                    { label: 'Aide / Question générale', value: 'aide', emoji: '💬', description: 'Besoin d\'un renseignement' },
+                    { label: 'Autre demande', value: 'autre', emoji: '📌', description: 'Autre sujet' }
                 ]);
 
             const row = new ActionRowBuilder().addComponents(menu);
             await interaction.channel.send({ embeds: [embed], components: [row] });
-            return interaction.reply({ content: '✅ Panel envoyé !', ephemeral: true });
+            return interaction.reply({ content: '✅ Panel de tickets envoyé !', ephemeral: true });
         }
     }
 
@@ -97,7 +201,7 @@ client.on('interactionCreate', async interaction => {
         const motif = interaction.values[0];
 
         try {
-            const channelName = `secours-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
+            const channelName = `ticket-${interaction.user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
             const ticketChannel = await interaction.guild.channels.create({
                 name: channelName,
                 type: ChannelType.GuildText,
@@ -108,49 +212,32 @@ client.on('interactionCreate', async interaction => {
                 ],
             });
 
-            ticketSteps.set(ticketChannel.id, { 
-                userId: interaction.user.id, 
-                motif: motif 
-            });
-
             const welcomeEmbed = new EmbedBuilder()
-                .setTitle('💬 Espace d\'écoute intelligent')
-                .setDescription(`Bonjour ${interaction.user} ! 👋\nJ'ai bien reçu ta demande concernant : **${motif.toUpperCase()}**.\n\nDis-moi tout, je t'écoute et je suis là pour t'aider.`)
+                .setTitle('🎫 Ticket Ouvert')
+                .setDescription(`Bonjour ${interaction.user} !\nVotre demande concernant **[${motif.toUpperCase()}]** a bien été prise en compte. L'équipe va vous répondre rapidement.`)
                 .setColor('#5865F2');
 
             const closeRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le salon').setEmoji('🔒').setStyle(ButtonStyle.Danger)
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('Fermer le ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger)
             );
 
             await ticketChannel.send({ content: `${interaction.user}`, embeds: [welcomeEmbed], components: [closeRow] });
-            return interaction.editReply({ content: `✅ Espace créé : ${ticketChannel}` });
+            return interaction.editReply({ content: `✅ Votre salon de ticket a été créé : ${ticketChannel}` });
         } catch (e) {
-            return interaction.editReply({ content: `❌ Erreur lors de la création.` });
+            return interaction.editReply({ content: `❌ Erreur lors de la création du ticket.` });
         }
     }
 
     if (interaction.isButton() && interaction.customId === 'close_ticket') {
-        await interaction.reply({ content: '🔒 Fermeture et génération du transcript...', ephemeral: true });
+        await interaction.reply({ content: '🔒 Fermeture du ticket en cours...', ephemeral: true });
 
         try {
             const messages = await interaction.channel.messages.fetch({ limit: 100 });
-            let transcript = `--- TRANSCRIPT ---\nSalon : ${interaction.channel.name}\nDate : ${new Date().toLocaleString()}\n\n`;
+            let transcript = `--- TRANSCRIPT DE TICKET ---\nSalon : ${interaction.channel.name}\nDate : ${new Date().toLocaleString()}\n\n`;
             messages.reverse().forEach(m => {
                 transcript += `[${new Date(m.createdTimestamp).toLocaleTimeString()}] ${m.author.tag}: ${m.content}\n`;
             });
 
-            const buffer = Buffer.from(transcript, 'utf-8');
-            const attachment = new AttachmentBuilder(buffer, { name: `transcript-${interaction.channel.name}.txt` });
-
-            const ownerId = ticketSteps.get(interaction.channel.id)?.userId;
-            if (ownerId) {
-                const memberTarget = await interaction.guild.members.fetch(ownerId).catch(() => null);
-                if (memberTarget) {
-                    await memberTarget.send({ content: '📄 Ton compte-rendu :', files: [attachment] }).catch(() => {});
-                }
-            }
-
-            ticketSteps.delete(interaction.channel.id);
             setTimeout(async () => {
                 try { await interaction.channel.delete(); } catch (e) {}
             }, 3000);
@@ -160,78 +247,5 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Fonction pour interroger Groq avec le modèle stable
-async function askGroq(promptText, motif) {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) return "Clé API Groq non configurée !";
-
-    const url = "https://api.groq.com/openai/v1/chat/completions";
-
-    const systemInstructionText = `Tu es Yodo Protect, un assistant virtuel bienveillant, rassurant et à l'écoute sur Discord, spécialisé dans l'aide aux victimes de harcèlement ou de conflits. Le motif du ticket est : ${motif}. Ton rôle est de discuter avec l'utilisateur, de le mettre en confiance, de lui poser des questions douces pour comprendre la situation et de lui demander des preuves (captures d'écran, liens). Sois concis (maximum 2-3 phrases), chaleureux et utilise des émojis. IMPORTANT : Si tu estimes que l'utilisateur a suffisamment expliqué son problème ou qu'il y a une urgence, inclus le mot-clé exact [CONTACT_STAFF] à la fin de ta réponse.`;
-
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: "llama-3.1-8b-instant",
-                messages: [
-                    { role: "system", content: systemInstructionText },
-                    { role: "user", content: promptText }
-                ]
-            })
-        });
-
-        const data = await response.json();
-        
-        if (data.error) {
-            console.error("Erreur Groq :", JSON.stringify(data.error));
-            return `Erreur API Groq : ${data.error.message || 'Problème inconnu'}`;
-        }
-
-        if (data.choices && data.choices[0].message.content) {
-            return data.choices[0].message.content;
-        }
-        return "Je t'écoute, raconte-moi ce qui se passe.";
-    } catch (error) {
-        console.error('Erreur technique fetch Groq:', error);
-        return "Oups, j'ai eu un petit souci de connexion, mais je suis là.";
-    }
-}
-
-// Gestion des messages avec l'IA Groq
-client.on('messageCreate', async message => {
-    if (message.author.bot || !message.guild) return;
-
-    if (ticketSteps.has(message.channel.id)) {
-        const ticketData = ticketSteps.get(message.channel.id);
-        const config = serverConfigs.get(message.guild.id) || { staffRoleId: null };
-
-        await message.channel.sendTyping();
-
-        let replyText = await askGroq(message.content, ticketData.motif);
-
-        let notifyStaff = false;
-        if (replyText.includes('[CONTACT_STAFF]')) {
-            notifyStaff = true;
-            replyText = replyText.replace('[CONTACT_STAFF]', '').trim();
-        }
-
-        await message.reply(replyText);
-
-        if (notifyStaff) {
-            let staffMention = config.staffRoleId ? `<@&${config.staffRoleId}>` : '**[Rôle Staff non configuré]**';
-            const staffEmbed = new EmbedBuilder()
-                .setTitle('🚨 Intervention du Staff demandée par l\'IA')
-                .setDescription('L\'assistant a analysé la situation et estimé qu\'un membre de l\'équipe doit intervenir pour aider cet utilisateur.')
-                .setColor('#2ECC71');
-
-            await message.channel.send({ content: `${staffMention}`, embeds: [staffEmbed] });
-        }
-    }
-});
-
 client.login(process.env.TOKEN);
+        
