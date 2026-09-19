@@ -1,15 +1,13 @@
 {
-  "name": "yodo-protect",
+  "name": "yodoprotect-bot",
   "version": "1.0.0",
-  "description": "Bot Discord et Dashboard",
+  "description": "Bot officiel YodoProtect",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.7.9",
-    "discord.js": "^14.18.0",
-    "express": "^4.21.2"
+    "discord.js": "^14.14.0",
+    "dotenv": "^16.4.5"
   }
 }
-
